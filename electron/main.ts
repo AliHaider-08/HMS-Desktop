@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import { copyFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { closeDatabase, getDatabase, openDatabase } from './db/connection';
 import { runMigrations } from './db/migrate';
 import { createUserRepository } from './db/repositories/userRepository';
@@ -52,6 +52,15 @@ function backupDirectory(): string {
 
 function exportDirectory(): string {
   return path.join(app.getPath('documents'), 'Gul Khan Fast Food');
+}
+
+/**
+ * Window/taskbar icon. Packaged builds get it from the exe (build/icon.ico); in
+ * development electron-builder's resources folder is not present, so it is optional.
+ */
+function windowIcon(): string | undefined {
+  const candidate = path.join(__dirname, '../../build/icon.png');
+  return existsSync(candidate) ? candidate : undefined;
 }
 
 async function bootstrapServices(): Promise<void> {
@@ -219,6 +228,7 @@ function createMainWindow(): void {
     show: false,
     backgroundColor: '#F8F9FA',
     title: 'Gul Khan Fast Food',
+    icon: windowIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

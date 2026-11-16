@@ -43,7 +43,7 @@ npm run dist:win   # Windows NSIS installer in release/
 | Command             | What it does                                            |
 | ------------------- | ------------------------------------------------------- |
 | `npm run dev`       | Vite on 5173 + Electron window                          |
-| `npm run verify`    | Typecheck + lint + **all phase tests** (88 checks)      |
+| `npm run verify`    | Typecheck + lint + **all phase tests** (90 checks)      |
 | `npm run test:all`  | Build main process, then run every phase test           |
 | `npm run test:auth` | Phase 1 checks only                                     |
 | `npm run typecheck` | Strict TypeScript for renderer, config and main process |

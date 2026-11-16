@@ -32,6 +32,9 @@ Fast Food Management Desktop App (Electron + React + SQLite)
       expenses, registration/insurance expiry reminders
 - [x] Phase 6 — reports (sales, top items, deliveries, salaries, vehicle costs), date presets, CSV
       export, backup/restore, README, phase test suites
+- [x] Release polish — app icon (`build/icon.ico` + `build/icon.png`, wired into NSIS and the
+      window), `docs/user-guide.md` for owner/cashier, log rotation, installer config validated by
+      electron-builder's own schema in a test
 
 PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all checks green.
 
@@ -45,7 +48,7 @@ PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all
 
 ## Verification (headless)
 `npm run verify` runs typecheck + lint + all phase tests.
-Last result: **88 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
+Last result: **90 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
 
 | Suite | Checks |
 | --- | --- |
@@ -54,7 +57,7 @@ Last result: **88 checks passed, 0 failed** (`npm run test:all`), stable across 
 | Phase 3 (`scripts/test-phase3.mjs`) | 18 |
 | Phase 4 (`scripts/test-phase4.mjs`) | 11 |
 | Phase 5 (`scripts/test-phase5.mjs`) | 13 |
-| Phase 6 (`scripts/test-phase6.mjs`) | 11 |
+| Phase 6 (`scripts/test-phase6.mjs`) | 13 |
 
 ## Decisions Made
 - Electron 45, React 19, Vite 7, TypeScript 5.9, Tailwind 3, Zustand 5, React Router 7 (hash
@@ -98,10 +101,11 @@ Last result: **88 checks passed, 0 failed** (`npm run test:all`), stable across 
   installed printer driver — verify on the real receipt printer.
 - No Urdu language support yet (open question from the PRD). Font would be Noto Nastaliq Urdu.
 - Expense/salary history is per month; no multi-year archive screen (data is still stored).
-- Log rotation is not implemented (`logs/app.log` grows; small file, low risk).
+- ~~Log rotation is not implemented~~ — **fixed**: `app.log` rotates to `app.log.1` at 5 MB and only
+  one old file is kept (`electron/services/logger.ts`, covered by a Phase 6 test).
 
 ## Next Steps
-1. `npm install`, then `npm run verify` on the shop PC (expect 88 checks passed).
+1. `npm install`, then `npm run verify` on the shop PC (expect 90 checks passed).
 2. `npm run dev` (optionally `SEED_DEMO=1` for sample data) and work through the manual checklist.
 3. Confirm the thermal printer and the tax question (FBR/PRA) with the owner.
 4. `npm run dist:win`, install on a clean PC, re-test login, order + print, backup/restore.

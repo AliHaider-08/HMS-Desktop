@@ -182,6 +182,100 @@ await runner.check('restore refuses a missing file', async () => {
   if (result.error.code !== 'NOT_FOUND') throw new Error(`unexpected code ${result.error.code}`);
 });
 
+await runner.check('the log file rotates instead of growing forever', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const module = await import('node:module');
+
+  const require = module.createRequire(import.meta.url);
+  const logger = require(
+    new URL('../dist-electron/electron/services/logger.js', import.meta.url).pathname,
+  );
+
+  const logDir = path.join(harness.tempDir, 'logs-rotation');
+  fs.mkdirSync(logDir, { recursive: true });
+
+  // Start with a log just over the 5 MB limit, then write one more line.
+  fs.writeFileSync(path.join(logDir, 'app.log'), Buffer.alloc(5.2 * 1024 * 1024, 'x'));
+  logger.configureLogger(logDir);
+  logger.logInfo('line written after rotation');
+
+  const rotated = path.join(logDir, 'app.log.1');
+  if (!fs.existsSync(rotated)) throw new Error('the large log was not rotated to app.log.1');
+  if (fs.statSync(rotated).size < 5 * 1024 * 1024)
+    throw new Error('rotated file lost its contents');
+
+  const fresh = fs.readFileSync(path.join(logDir, 'app.log'), 'utf8');
+  if (!fresh.includes('line written after rotation'))
+    throw new Error('new log line was not written');
+  if (fresh.length > 4096) throw new Error('a fresh log should start small');
+
+  // Rotation must keep working, and only one old file is kept.
+  fs.writeFileSync(path.join(logDir, 'app.log'), Buffer.alloc(5.2 * 1024 * 1024, 'y'));
+  logger.logInfo('second rotation');
+  const files = fs.readdirSync(logDir).sort();
+  if (JSON.stringify(files) !== JSON.stringify(['app.log', 'app.log.1'])) {
+    throw new Error(`unexpected log folder contents: ${files.join(', ')}`);
+  }
+});
+
+await runner.check('the Windows installer is configured correctly', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const root = path.resolve(import.meta.dirname, '..');
+
+  const config = fs.readFileSync(path.join(root, 'electron-builder.yml'), 'utf8');
+
+  // Everything the packaged app needs at runtime.
+  for (const fragment of [
+    'appId: com.gulkhan.fastfood',
+    'productName: Gul Khan Fast Food',
+    'dist/**/*',
+    'dist-electron/**/*',
+    'package.json',
+    'npmRebuild: false',
+    'target: nsis',
+    'x64',
+    'icon: build/icon.ico',
+  ]) {
+    if (!config.includes(fragment)) throw new Error(`installer config is missing: ${fragment}`);
+  }
+
+  // Native .node binaries must be unpacked from the asar archive.
+  if (!config.includes("'**/node_modules/better-sqlite3/**'")) {
+    throw new Error('better-sqlite3 must be unpacked from asar');
+  }
+  if (!config.includes("'**/node_modules/bcrypt/**'")) {
+    throw new Error('bcrypt must be unpacked from asar');
+  }
+  if (!/^asar: true$/m.test(config)) throw new Error('asar packaging must stay on');
+
+  // Documents that are needed to install and to train staff.
+  for (const doc of ['README.md', 'docs/user-guide.md', 'build/icon.ico', 'build/icon.png']) {
+    if (!fs.existsSync(path.join(root, doc))) throw new Error(`missing release file: ${doc}`);
+  }
+
+  // Ask electron-builder itself whether the file is legal, so a typo in the
+  // installer config cannot reach the Windows build machine.
+  const require = (await import('node:module')).createRequire(import.meta.url);
+  const yaml = require('js-yaml');
+  const { validateConfiguration } = require('app-builder-lib/out/util/config/config');
+  const debugLogger = { info() {}, warn() {}, debug() {}, error() {} };
+
+  try {
+    await validateConfiguration(yaml.load(config), debugLogger);
+  } catch (error) {
+    throw new Error(`electron-builder rejected the config: ${error.message}`);
+  }
+
+  // Migrations ship with the compiled main process.
+  const migrations = path.join(root, 'dist-electron', 'electron', 'db', 'migrations');
+  const sqlFiles = fs.readdirSync(migrations).filter((file) => file.endsWith('.sql'));
+  if (sqlFiles.length !== 7) {
+    throw new Error(`expected 7 migrations in the build, found ${sqlFiles.length}`);
+  }
+});
+
 await runner.check('cashiers cannot read reports or export data', async () => {
   await harness.loginAs('cashier', 'cashier123');
 
