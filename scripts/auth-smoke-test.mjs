@@ -203,10 +203,27 @@ async function main() {
   });
 
   await check('role page permissions come from the main process map', () => {
-    assert.deepEqual(getRolePermissions('cashier').pages, ['home']);
-    assert.deepEqual(getRolePermissions('manager').pages, ['home', 'reports']);
-    assert.deepEqual(getRolePermissions('admin').pages, ['home', 'users', 'settings', 'reports']);
+    assert.deepEqual(getRolePermissions('cashier').pages, ['home', 'orders', 'menu']);
+    assert.deepEqual(getRolePermissions('manager').pages, [
+      'home',
+      'orders',
+      'menu',
+      'staff',
+      'vehicles',
+      'reports',
+    ]);
+    assert.deepEqual(getRolePermissions('admin').pages, [
+      'home',
+      'orders',
+      'menu',
+      'staff',
+      'vehicles',
+      'reports',
+      'users',
+      'settings',
+    ]);
     assert.equal(roleHasPage('cashier', 'settings'), false);
+    assert.equal(roleHasPage('cashier', 'staff'), false);
     assert.equal(roleHasPage('admin', 'settings'), true);
   });
 

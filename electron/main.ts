@@ -1,17 +1,40 @@
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import { closeDatabase, openDatabase } from './db/connection';
+import { copyFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { closeDatabase, getDatabase, openDatabase } from './db/connection';
 import { runMigrations } from './db/migrate';
 import { createUserRepository } from './db/repositories/userRepository';
+import { createSettingsRepository } from './db/repositories/settingsRepository';
+import { createCatalogRepository } from './db/repositories/catalogRepository';
+import { createOrdersRepository } from './db/repositories/ordersRepository';
+import { createStaffRepository } from './db/repositories/staffRepository';
+import { createVehiclesRepository } from './db/repositories/vehiclesRepository';
+import { createSequenceRepository } from './db/repositories/sequenceRepository';
 import { seedDefaultAdmin } from './db/seed';
+import { seedDemoData } from './db/seedDemo';
 import { createAuthService } from './services/authService';
+import { createSettingsService } from './services/settingsService';
+import { createUserService } from './services/userService';
+import { createCatalogService } from './services/catalogService';
+import { createOrdersService } from './services/ordersService';
+import { createStaffService } from './services/staffService';
+import { createVehiclesService } from './services/vehiclesService';
+import { createReportsService } from './services/reportsService';
+import { createCsvService } from './services/csvService';
+import { createBackupService } from './services/backupService';
+import { createPrintService } from './services/printService';
+import { buildRegistry, dispatch } from './ipc';
 import { configureLogger, logError, logInfo } from './services/logger';
-import { registerIpc } from './ipc/registerIpc';
+import type { AuthService } from './services/authService';
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+const allowDemoData = process.env.SEED_DEMO === '1' || process.argv.includes('--demo-data');
 
 let mainWindow: BrowserWindow | null = null;
+let authService: AuthService | null = null;
+let registry: ReturnType<typeof buildRegistry> | null = null;
+let backupServiceInstance: ReturnType<typeof createBackupService> | null = null;
 
 function databaseFile(): string {
   return path.join(app.getPath('userData'), 'data', 'fastfood.db');
@@ -23,7 +46,15 @@ function migrationsDirectory(): string {
   return path.join(__dirname, 'db', 'migrations');
 }
 
-async function bootstrapDatabase(): Promise<void> {
+function backupDirectory(): string {
+  return path.join(app.getPath('userData'), 'backups');
+}
+
+function exportDirectory(): string {
+  return path.join(app.getPath('documents'), 'Gul Khan Fast Food');
+}
+
+async function bootstrapServices(): Promise<void> {
   configureLogger(path.join(app.getPath('userData'), 'logs'));
   logInfo(`Starting app version ${app.getVersion()} (dev: ${isDev})`);
 
@@ -31,19 +62,153 @@ async function bootstrapDatabase(): Promise<void> {
   const applied = runMigrations(db, migrationsDirectory());
   logInfo(`Database ready. Migrations applied this run: ${applied}`);
 
+  // Repositories prepare statements, so they are created after migrations.
   const users = createUserRepository(db);
+  const settingsRepo = createSettingsRepository(db);
+  const catalogRepo = createCatalogRepository(db);
+  const ordersRepo = createOrdersRepository(db);
+  const staffRepo = createStaffRepository(db);
+  const vehiclesRepo = createVehiclesRepository(db);
+  const sequences = createSequenceRepository(db);
+
   await seedDefaultAdmin(users);
+  if (allowDemoData) {
+    await seedDemoData({ users, catalog: catalogRepo, orders: ordersRepo, staff: staffRepo });
+  }
 
   const auth = createAuthService(users);
-  registerIpc(auth);
+  authService = auth;
+
+  const staffService = createStaffService({
+    staff: staffRepo,
+    vehicles: vehiclesRepo,
+    commissionForMonth: (deliveryBoyId, month) => {
+      const from = `${month}-01`;
+      const to = `${month}-31`;
+      return (
+        ordersRepo.deliveriesByBoy(from, to).find((row) => row.deliveryBoyId === deliveryBoyId)
+          ?.commission ?? 0
+      );
+    },
+  });
+
+  const backups = createBackupService(databaseFile(), backupDirectory(), {
+    checkpoint: () => {
+      getDatabase().pragma('wal_checkpoint(TRUNCATE)');
+    },
+    replaceWith: (sourcePath) => {
+      closeDatabase();
+      copyFileSync(sourcePath, databaseFile());
+      // Drop stale WAL/SHM files from the previous database before reopening.
+      for (const suffix of ['-wal', '-shm']) {
+        try {
+          unlinkSync(`${databaseFile()}${suffix}`);
+        } catch {
+          // The file may not exist; that is fine.
+        }
+      }
+      openDatabase(databaseFile());
+    },
+  });
+
+  backupServiceInstance = backups;
+
+  const printService = createPrintService({
+    getWindow: () => mainWindow,
+    pdfDirectory: exportDirectory,
+    markPrinted: (orderId) => {
+      ordersRepo.markInvoicePrinted(orderId);
+    },
+  });
+
+  const reportsService = createReportsService({
+    orders: ordersRepo,
+    catalog: catalogRepo,
+    staff: staffRepo,
+    vehicles: vehiclesRepo,
+    staffService,
+  });
+
+  const csvService = createCsvService({
+    reports: reportsService,
+    exportDirectory,
+    salarySummary: (month) => reportsService.salarySummary(month),
+  });
+
+  registry = buildRegistry({
+    auth,
+    catalog: createCatalogService(catalogRepo),
+    orders: createOrdersService({
+      orders: ordersRepo,
+      catalog: catalogRepo,
+      sequences,
+      settings: settingsRepo,
+      staff: staffRepo,
+      users,
+    }),
+    staff: staffService,
+    vehicles: createVehiclesService({ vehicles: vehiclesRepo, staff: staffRepo }),
+    reports: reportsService,
+    settings: createSettingsService(settingsRepo),
+    users: createUserService(users),
+    backups,
+    print: printService,
+    csv: csvService,
+  });
+}
+
+function registerIpcHandlers(): void {
+  const handlers = registry;
+  const auth = authService;
+  if (!handlers || !auth) throw new Error('Services were not initialised');
+
+  // Every channel goes through the same dispatcher used by the dev bridge,
+  // so auth/role/capability/validation rules cannot drift between the two.
+  for (const channel of Object.keys(handlers)) {
+    ipcMain.handle(channel, async (_event, payload: unknown) =>
+      dispatch(
+        channel,
+        handlers,
+        payload,
+        () => auth.getCurrentUser(),
+        auth.getCurrentUser() !== null,
+      ),
+    );
+  }
+
+  // Logo picker needs a native dialog, so it is registered here rather than in the
+  // pure service layer.
+  ipcMain.handle('settings:pick-logo', async () => {
+    if (!auth.getCurrentUser() || auth.getCurrentUser()?.role !== 'admin') {
+      return {
+        ok: false,
+        error: { code: 'FORBIDDEN', message: 'Your role does not allow this action' },
+      };
+    }
+
+    const result = await dialog.showOpenDialog({
+      title: 'Choose the shop logo',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+    });
+
+    if (result.canceled || !result.filePaths[0]) return { ok: true, data: null };
+
+    const filePath = result.filePaths[0];
+    const extension = path.extname(filePath).slice(1).toLowerCase();
+    const mime = extension === 'jpg' ? 'jpeg' : extension;
+    const base64 = readFileSync(filePath).toString('base64');
+
+    return { ok: true, data: `data:image/${mime};base64,${base64}` };
+  });
 }
 
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 1024,
-    minHeight: 700,
+    width: 1360,
+    height: 860,
+    minWidth: 1100,
+    minHeight: 720,
     show: false,
     backgroundColor: '#F8F9FA',
     title: 'Gul Khan Fast Food',
@@ -51,15 +216,13 @@ function createMainWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // Preload needs the shared channel constants from the compiled build,
-      // which requires a real `require`; isolation + no node in the renderer still holds.
+      // The preload imports the shared channel constants, which needs a real require.
       sandbox: false,
     },
   });
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
-  // Never let the app navigate away or open random windows.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: 'deny' };
@@ -96,7 +259,7 @@ if (!hasSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     try {
-      await bootstrapDatabase();
+      await bootstrapServices();
     } catch (error) {
       logError('Startup failed while preparing the database', error);
       dialog.showErrorBox(
@@ -107,6 +270,7 @@ if (!hasSingleInstanceLock) {
       return;
     }
 
+    registerIpcHandlers();
     createMainWindow();
 
     app.on('activate', () => {
@@ -119,6 +283,19 @@ if (!hasSingleInstanceLock) {
   });
 
   app.on('before-quit', () => {
+    // Automatic backup on close, keeping the last 7 (Rules.md section 3).
+    try {
+      if (registry) {
+        const backupOnClose =
+          createSettingsRepository(getDatabase()).readShopSettings().backupOnClose;
+        if (backupOnClose) {
+          backupServiceInstance?.createBackup('auto');
+        }
+      }
+    } catch (error) {
+      logError('Automatic backup on close failed', error);
+    }
+
     closeDatabase();
   });
 }

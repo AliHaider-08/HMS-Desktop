@@ -5,11 +5,13 @@ import { RouteError } from './components/RouteError';
 import { LoginPage } from './pages/Login/LoginPage';
 import { ChangePasswordPage } from './pages/Login/ChangePasswordPage';
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
-import { PlaceholderPage } from './pages/Placeholder/PlaceholderPage';
+import { SettingsPage } from './pages/Settings/SettingsPage';
+import { UsersPage } from './pages/Users/UsersPage';
 
 /**
  * Hash routing is used because the packaged app runs from file://.
- * Every page inside the layout is wrapped in ProtectedRoute with its PageKey.
+ * Every page inside the layout is wrapped in ProtectedRoute with its PageKey;
+ * the main process re-checks the same permission on every IPC call.
  */
 export const router = createHashRouter([
   { path: '/login', element: <LoginPage /> },
@@ -40,10 +42,10 @@ export const router = createHashRouter([
         ),
       },
       {
-        path: 'reports',
+        path: 'settings',
         element: (
-          <ProtectedRoute requiredPage="reports">
-            <PlaceholderPage page="reports" />
+          <ProtectedRoute requiredPage="settings">
+            <SettingsPage />
           </ProtectedRoute>
         ),
       },
@@ -51,15 +53,7 @@ export const router = createHashRouter([
         path: 'users',
         element: (
           <ProtectedRoute requiredPage="users">
-            <PlaceholderPage page="users" />
-          </ProtectedRoute>
-        ),
-      },
-      {
-        path: 'settings',
-        element: (
-          <ProtectedRoute requiredPage="settings">
-            <PlaceholderPage page="settings" />
+            <UsersPage />
           </ProtectedRoute>
         ),
       },

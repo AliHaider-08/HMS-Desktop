@@ -88,9 +88,8 @@ export function LoginPage() {
             <div className="mt-6 flex items-start gap-2 rounded-control bg-background p-3 text-caption text-text-secondary">
               <Lock aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
-                First run? Use <span className="font-semibold text-text-primary">admin</span> /{' '}
-                <span className="font-semibold text-text-primary">admin123</span>. You will be asked
-                to set a new password straight away.
+                Passwords are checked offline on this computer. Accounts are created by the shop
+                owner, and a new password is required on first sign-in.
               </span>
             </div>
           </div>

@@ -1,22 +1,26 @@
 /**
  * Browser preview helper (development only).
  *
- * The real app is Electron: React talks to the main process over IPC, and that
- * main process is the only thing that may touch SQLite. For a quick UI preview
- * in a normal browser, this server serves the Vite build and emulates
- * `window.api.auth` in memory using the SAME schema validation.
+ * The real app is Electron: React talks to the main process over IPC. This server
+ * serves the built UI and exposes the SAME registry the Electron main process uses
+ * over HTTP, backed by a throw-away SQLite database in the temp folder.
  *
- * It is NOT part of the shipped app, it never loads the database,
- * and it is not used by `npm run dev` or by the packaged Windows build.
+ * Differences from the packaged app, on purpose:
+ *  - throw-away database with demo data, wiped on exit
+ *  - no native dialogs (logo picker, PDF, CSV export return a stub)
+ *  - printing is disabled
+ * It is never shipped, and `npm run dev` / the Windows build do not use it.
  */
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '..');
 const distDir = path.join(root, 'dist');
+const compiledDir = path.join(root, 'dist-electron', 'electron');
 const port = Number(process.env.PREVIEW_PORT ?? 4173);
 
 if (!existsSync(path.join(distDir, 'index.html'))) {
@@ -24,100 +28,112 @@ if (!existsSync(path.join(distDir, 'index.html'))) {
   process.exit(1);
 }
 
-const { loginSchema, changePasswordSchema } = require(
-  path.join(root, 'dist-electron', 'src', 'types', 'schemas.js'),
-);
+if (!existsSync(compiledDir)) {
+  console.error('[preview] dist-electron is missing. Run `npm run build:electron` first.');
+  process.exit(1);
+}
 
-// Demo users mirror the seeded database so the UI can be reviewed in a browser.
-const demoUsers = [
-  {
-    id: 1,
-    username: 'admin',
-    password: 'admin123',
-    fullName: 'Shop Owner',
-    role: 'admin',
-    mustChangePassword: true,
-  },
-  {
-    id: 2,
-    username: 'cashier',
-    password: 'cashier123',
-    fullName: 'Counter Staff',
-    role: 'cashier',
-    mustChangePassword: false,
-  },
-  {
-    id: 3,
-    username: 'manager',
-    password: 'manager123',
-    fullName: 'Shift Manager',
-    role: 'manager',
-    mustChangePassword: false,
-  },
-];
+const load = (relative) => require(path.join(compiledDir, relative));
 
-const ROLE_PAGES = {
-  admin: ['home', 'users', 'settings', 'reports'],
-  cashier: ['home'],
-  manager: ['home', 'reports'],
+const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gulkhan-preview-'));
+const { openDatabase, closeDatabase, getDatabase } = load('db/connection.js');
+const { runMigrations } = load('db/migrate.js');
+const { configureLogger } = load('services/logger.js');
+const { buildRegistry, dispatch } = load('ipc/index.js');
+
+configureLogger(path.join(tempDir, 'logs'));
+const db = openDatabase(path.join(tempDir, 'preview.db'));
+runMigrations(db, path.join(compiledDir, 'db', 'migrations'));
+
+const repos = {
+  users: load('db/repositories/userRepository.js').createUserRepository(db),
+  settings: load('db/repositories/settingsRepository.js').createSettingsRepository(db),
+  catalog: load('db/repositories/catalogRepository.js').createCatalogRepository(db),
+  orders: load('db/repositories/ordersRepository.js').createOrdersRepository(db),
+  staff: load('db/repositories/staffRepository.js').createStaffRepository(db),
+  vehicles: load('db/repositories/vehiclesRepository.js').createVehiclesRepository(db),
+  sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
 };
 
-let session = null;
+const auth = load('services/authService.js').createAuthService(repos.users);
+const staffService = load('services/staffService.js').createStaffService({
+  staff: repos.staff,
+  vehicles: repos.vehicles,
+  commissionForMonth: (deliveryBoyId, month) =>
+    repos.orders
+      .deliveriesByBoy(`${month}-01`, `${month}-31`)
+      .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
+});
+const reportsService = load('services/reportsService.js').createReportsService({
+  orders: repos.orders,
+  catalog: repos.catalog,
+  staff: repos.staff,
+  vehicles: repos.vehicles,
+  staffService,
+});
 
-/** Strips the demo password before a user object is sent to the browser. */
-function toPublicUser(user) {
-  return {
-    id: user.id,
-    username: user.username,
-    fullName: user.fullName,
-    role: user.role,
-    mustChangePassword: user.mustChangePassword,
-  };
-}
-const ok = (data) => ({ ok: true, data });
-const fail = (code, message) => ({ ok: false, error: { code, message } });
+const registry = buildRegistry({
+  auth,
+  catalog: load('services/catalogService.js').createCatalogService(repos.catalog),
+  orders: load('services/ordersService.js').createOrdersService({
+    orders: repos.orders,
+    catalog: repos.catalog,
+    sequences: repos.sequences,
+    settings: repos.settings,
+    staff: repos.staff,
+    users: repos.users,
+  }),
+  staff: staffService,
+  vehicles: load('services/vehiclesService.js').createVehiclesService({
+    vehicles: repos.vehicles,
+    staff: repos.staff,
+  }),
+  reports: reportsService,
+  settings: load('services/settingsService.js').createSettingsService(repos.settings),
+  users: load('services/userService.js').createUserService(repos.users),
+  backups: load('services/backupService.js').createBackupService(
+    path.join(tempDir, 'preview.db'),
+    path.join(tempDir, 'backups'),
+    {
+      checkpoint: () => getDatabase().pragma('wal_checkpoint(TRUNCATE)'),
+      replaceWith: () => undefined,
+    },
+  ),
+  print: {
+    printInvoice: async () => {
+      throw new Error('Printing is not available in the browser preview');
+    },
+    savePdf: async () => null,
+    renderHtml: load('services/printService.js').renderInvoiceHtml,
+  },
+  csv: load('services/csvService.js').createCsvService({
+    reports: reportsService,
+    exportDirectory: () => tempDir,
+    salarySummary: (month) => reportsService.salarySummary(month),
+  }),
+});
 
-const routes = {
-  'auth:login': (payload) => {
-    const parsed = loginSchema.safeParse(payload);
-    if (!parsed.success) {
-      return fail('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid input');
-    }
-    const user = demoUsers.find(
-      (candidate) => candidate.username.toLowerCase() === parsed.data.username.toLowerCase(),
-    );
-    if (!user || user.password !== parsed.data.password) {
-      return fail('INVALID_CREDENTIALS', 'Wrong username or password');
-    }
-    session = user;
-    return ok(toPublicUser(user));
-  },
-  'auth:logout': () => {
-    session = null;
-    return ok(null);
-  },
-  'auth:session': () => ok(session ? toPublicUser(session) : null),
-  'auth:permissions': () =>
-    ok(session ? { role: session.role, pages: ROLE_PAGES[session.role] } : null),
-  'auth:change-password': (payload) => {
-    const account = demoUsers.find((user) => user.username === payload?.username);
-    if (!account) return fail('UNAUTHENTICATED', 'Please log in to continue');
-    const parsed = changePasswordSchema.safeParse(payload);
-    if (!parsed.success) {
-      return fail('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid input');
-    }
-    if (parsed.data.currentPassword !== account.password) {
-      return fail('INVALID_CREDENTIALS', 'Current password is not correct');
-    }
-    account.password = parsed.data.newPassword;
-    account.mustChangePassword = false;
-    return ok(toPublicUser(account));
-  },
+const { seedDefaultAdmin } = load('db/seed.js');
+await seedDefaultAdmin(repos.users);
+await load('db/seedDemo.js').seedDemoData({
+  users: repos.users,
+  catalog: repos.catalog,
+  orders: repos.orders,
+  staff: repos.staff,
+});
+
+// The preview is a browser, so a forced password change would block every screen.
+// Only this throw-away database is affected.
+db.prepare('UPDATE users SET must_change_password = 0').run();
+
+// Logo picking needs a native dialog; the preview returns nothing instead.
+registry['settings:pick-logo'] = {
+  roles: ['admin'],
+  handler: () => null,
 };
 
 const BRIDGE_TAG = '<script src="/__preview/bridge.js"></script>';
 
-/** Index.html with the demo bridge injected and a preview-only CSP. */
 function previewHtml() {
   return readFileSync(path.join(distDir, 'index.html'), 'utf8')
     .replace(
@@ -157,25 +173,44 @@ function serveStatic(requestUrl, response) {
 }
 
 const server = createServer((request, response) => {
+  if (request.url === '/__preview/bridge.js') {
+    response.writeHead(200, { 'Content-Type': MIME['.js'] });
+    response.end(readFileSync(path.join(root, 'scripts', 'preview-bridge.js')));
+    return;
+  }
+
   if (request.method === 'POST' && request.url === '/__preview/ipc') {
     let body = '';
     request.on('data', (chunk) => {
       body += chunk;
     });
-    request.on('end', () => {
+    request.on('end', async () => {
+      const started = Date.now();
       let message;
       try {
         message = JSON.parse(body || '{}');
       } catch {
         response.writeHead(400, { 'Content-Type': MIME['.json'] });
-        response.end(JSON.stringify(fail('VALIDATION_ERROR', 'Malformed request')));
+        response.end(
+          JSON.stringify({
+            ok: false,
+            error: { code: 'VALIDATION_ERROR', message: 'Malformed request' },
+          }),
+        );
         return;
       }
 
-      const handler = routes[message.channel];
-      const result = handler
-        ? handler(message.args)
-        : fail('INTERNAL_ERROR', `Unknown preview channel: ${message.channel}`);
+      const result = await dispatch(
+        message.channel,
+        registry,
+        message.args,
+        () => auth.getCurrentUser(),
+        auth.getCurrentUser() !== null,
+      );
+
+      if (Date.now() - started > 400) {
+        console.log(`[preview] slow channel ${message.channel} (${Date.now() - started}ms)`);
+      }
 
       response.writeHead(200, { 'Content-Type': MIME['.json'] });
       response.end(JSON.stringify(result));
@@ -183,16 +218,20 @@ const server = createServer((request, response) => {
     return;
   }
 
-  if (request.url === '/__preview/bridge.js') {
-    response.writeHead(200, { 'Content-Type': MIME['.js'] });
-    response.end(readFileSync(path.join(root, 'scripts', 'preview-bridge.js')));
-    return;
-  }
-
   serveStatic(request.url ?? '/', response);
 });
 
 server.listen(port, '0.0.0.0', () => {
-  console.log(`[preview] UI preview on http://0.0.0.0:${port} (in-memory demo auth, no database)`);
-  console.log('[preview] users: admin/admin123, cashier/cashier123, manager/manager123');
+  console.log(`[preview] UI preview on http://0.0.0.0:${port} (throw-away database, demo data)`);
+  console.log('[preview] admin/admin123 · manager/manager123 · cashier/cashier123');
 });
+
+function shutdown() {
+  server.close();
+  closeDatabase();
+  rmSync(tempDir, { recursive: true, force: true });
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
