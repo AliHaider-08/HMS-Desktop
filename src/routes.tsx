@@ -9,6 +9,7 @@ import { MenuPage } from './pages/Menu/MenuPage';
 import { OrdersPage } from './pages/Orders/OrdersPage';
 import { NewOrderPage } from './pages/Orders/NewOrderPage';
 import { InvoicePage } from './pages/Invoice/InvoicePage';
+import { StaffPage } from './pages/Staff/StaffPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { UsersPage } from './pages/Users/UsersPage';
 
@@ -74,6 +75,14 @@ export const router = createHashRouter([
         element: (
           <ProtectedRoute requiredPage="orders">
             <InvoicePage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'staff',
+        element: (
+          <ProtectedRoute requiredPage="staff">
+            <StaffPage />
           </ProtectedRoute>
         ),
       },

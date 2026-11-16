@@ -15,7 +15,7 @@ await harness.callOk('auth:change-password', {
 });
 
 const menu = await harness.callOk('menu:items');
-const [burger, nuggets] = [menu[0], menu[1]];
+const burger = menu[0];
 
 let menuCategoryId;
 let createdItemId;
