@@ -73,7 +73,13 @@ async function bootstrapServices(): Promise<void> {
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
-    await seedDemoData({ users, catalog: catalogRepo, orders: ordersRepo, staff: staffRepo });
+    await seedDemoData({
+      users,
+      catalog: catalogRepo,
+      orders: ordersRepo,
+      staff: staffRepo,
+      sequences,
+    });
   }
 
   const auth = createAuthService(users);

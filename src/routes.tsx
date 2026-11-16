@@ -5,6 +5,10 @@ import { RouteError } from './components/RouteError';
 import { LoginPage } from './pages/Login/LoginPage';
 import { ChangePasswordPage } from './pages/Login/ChangePasswordPage';
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
+import { MenuPage } from './pages/Menu/MenuPage';
+import { OrdersPage } from './pages/Orders/OrdersPage';
+import { NewOrderPage } from './pages/Orders/NewOrderPage';
+import { InvoicePage } from './pages/Invoice/InvoicePage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { UsersPage } from './pages/Users/UsersPage';
 
@@ -38,6 +42,38 @@ export const router = createHashRouter([
         element: (
           <ProtectedRoute requiredPage="home">
             <DashboardPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'menu',
+        element: (
+          <ProtectedRoute requiredPage="menu">
+            <MenuPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'orders',
+        element: (
+          <ProtectedRoute requiredPage="orders">
+            <OrdersPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'orders/new',
+        element: (
+          <ProtectedRoute requiredPage="orders">
+            <NewOrderPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'invoice/:id',
+        element: (
+          <ProtectedRoute requiredPage="orders">
+            <InvoicePage />
           </ProtectedRoute>
         ),
       },

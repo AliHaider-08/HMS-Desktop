@@ -2,6 +2,7 @@ import type { UserRepository } from './repositories/userRepository';
 import type { CatalogRepository } from './repositories/catalogRepository';
 import type { OrdersRepository } from './repositories/ordersRepository';
 import type { StaffRepository } from './repositories/staffRepository';
+import type { SequenceRepository } from './repositories/sequenceRepository';
 import { hashPassword } from '../utils/password';
 import { toSqlDate } from '../utils/datetime';
 import { logInfo } from '../services/logger';
@@ -15,8 +16,9 @@ export async function seedDemoData(deps: {
   catalog: CatalogRepository;
   orders: OrdersRepository;
   staff: StaffRepository;
+  sequences: SequenceRepository;
 }): Promise<void> {
-  const { users, catalog, orders, staff } = deps;
+  const { users, catalog, orders, staff, sequences } = deps;
 
   if (catalog.listItems().length > 0) {
     logInfo('Demo data skipped: the menu already has items');
@@ -117,9 +119,6 @@ export async function seedDemoData(deps: {
     { daysAgo: 5, type: 'delivery' as const, picks: [1, 5], qty: 2 },
   ];
 
-  let orderNumber = 1;
-  let invoiceNumber = 1;
-
   for (const entry of plan) {
     const picked = entry.picks
       .map((index) => itemIds[index])
@@ -138,6 +137,11 @@ export async function seedDemoData(deps: {
     const tax = Math.round(subtotal * 0.05);
     const date = new Date(today);
     date.setDate(today.getDate() - entry.daysAgo);
+
+    // Numbers come from the same sequence the real app uses, so live orders
+    // never collide with demo orders.
+    const orderNumber = sequences.next('order');
+    const invoiceNumber = sequences.next('invoice');
 
     orders.create({
       orderNo: `ORD-${String(orderNumber).padStart(5, '0')}`,
@@ -158,10 +162,7 @@ export async function seedDemoData(deps: {
       createdBy,
       items: lines,
     });
-
-    orderNumber += 1;
-    invoiceNumber += 1;
   }
 
-  logInfo('Demo data seeded (2 categories images, 9 items, 2 waiters, 1 rider, 6 orders)');
+  logInfo('Demo data seeded: 4 categories, 9 items, 2 waiters, 1 rider, 6 orders');
 }

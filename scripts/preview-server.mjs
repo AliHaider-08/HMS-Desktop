@@ -120,6 +120,7 @@ await load('db/seedDemo.js').seedDemoData({
   catalog: repos.catalog,
   orders: repos.orders,
   staff: repos.staff,
+  sequences: repos.sequences,
 });
 
 // The preview is a browser, so a forced password change would block every screen.

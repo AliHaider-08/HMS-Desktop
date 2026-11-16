@@ -81,10 +81,13 @@ export function createHarness({ withDemoData = true } = {}) {
     replaceWith: () => undefined,
   });
 
+  const { renderInvoiceHtml } = load('services/printService.js');
+
+  // Printing needs a real window, so the harness stubs it the way Electron would call it.
   const printStub = {
     printInvoice: async () => true,
     savePdf: async () => null,
-    renderHtml: load('services/printService.js').renderInvoiceHtml,
+    renderHtml: renderInvoiceHtml,
   };
 
   const registry = buildRegistry({
@@ -157,6 +160,7 @@ export function createHarness({ withDemoData = true } = {}) {
         catalog: repositories.catalog,
         orders: repositories.orders,
         staff: repositories.staff,
+        sequences: repositories.sequences,
       });
     }
   }
@@ -180,6 +184,7 @@ export function createHarness({ withDemoData = true } = {}) {
     loginAs,
     setup,
     cleanup,
+    renderInvoiceHtml,
   };
 }
 
