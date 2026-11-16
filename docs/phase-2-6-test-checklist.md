@@ -1,7 +1,7 @@
 # Manual Test Checklist — Phases 2 to 6
 
 Run `npm run dev` (or install the Windows build) and walk through this list before handover.
-Everything below was verified headlessly (88 automated checks), but window, printing, dialogs and
+Everything below was verified headlessly (90 automated checks), but window, printing, dialogs and
 the installer need a real machine.
 
 Sign in as **admin** (default `admin` / `admin123`; the app forces a password change on first run).
@@ -83,6 +83,12 @@ Sign in as **admin** (default `admin` / `admin123`; the app forces a password ch
 - [ ] Close the app → a backup is created automatically (if "backup on close" is enabled).
 - [ ] `npm run dist:win` produces `release/Gul Khan Fast Food Setup *.exe`; install on a clean
       machine, sign in, take an order, print, and restore a backup.
+- [ ] The installer, Start Menu and desktop shortcut all show the red burger icon, and the window
+      and taskbar show it too (not the default Electron logo).
+- [ ] After a few weeks of use, `logs` contains only `app.log` and maybe `app.log.1` — it did not
+      grow into a huge file.
+- [ ] Give `docs/user-guide.md` to the cashier; they can take and reprint an order after 15 minutes
+      of reading, without being shown.
 - [ ] Uninstall leaves the data folder intact (no accidental data loss).
 
 ## Regression sweep
