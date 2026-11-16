@@ -33,6 +33,8 @@ Fast Food Management Desktop App (Electron + React + SQLite)
 - [x] Phase 6 — reports (sales, top items, deliveries, salaries, vehicle costs), date presets, CSV
       export, backup/restore, README, phase test suites
 
+PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all checks green.
+
 ## Phase Progress
 - [x] Phase 1: Setup and Login
 - [x] Phase 2: Dashboard and Layout
