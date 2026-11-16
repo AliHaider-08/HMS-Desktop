@@ -24,7 +24,10 @@ export function errorMessage(error: unknown, fallback = 'Something went wrong'):
   return fallback;
 }
 
-/** Guard used by the store/hooks when the UI is opened outside Electron (plain browser). */
+/**
+ * The single bridge object. In Electron this is the preload-created `window.api`;
+ * the dev preview injects an equivalent object, so no page needs to care which.
+ */
 export function getApi() {
   if (!window.api) {
     throw new ApiRequestError({

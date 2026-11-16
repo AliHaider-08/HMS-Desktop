@@ -1,17 +1,27 @@
 import { ShieldAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { PageKey } from '../../types/api';
-import { ROLE_LABELS } from '../../types/user';
+import { ROLE_LABELS } from '../../types/labels';
 import { useAuth } from '../../hooks/useAuth';
 
 interface AccessDeniedProps {
   requiredPage: PageKey;
 }
 
+const PAGE_LABELS: Record<PageKey, string> = {
+  home: 'Dashboard',
+  orders: 'Orders',
+  menu: 'Menu',
+  staff: 'Staff',
+  vehicles: 'Vehicles',
+  reports: 'Reports',
+  users: 'Users',
+  settings: 'Settings',
+};
+
 /** Shown by the route guard when a signed-in user opens a page their role lacks. */
 export function AccessDenied({ requiredPage }: AccessDeniedProps) {
   const { user } = useAuth();
-  const pageLabel = requiredPage.charAt(0).toUpperCase() + requiredPage.slice(1);
 
   return (
     <div className="flex h-full items-center justify-center bg-background p-6">
@@ -19,7 +29,7 @@ export function AccessDenied({ requiredPage }: AccessDeniedProps) {
         <ShieldAlert aria-hidden className="mx-auto mb-3 h-10 w-10 text-primary" />
         <h1 className="mb-1 text-section-title">Not allowed</h1>
         <p className="mb-4 text-body text-text-secondary">
-          The {pageLabel} page is not available to the{' '}
+          The {PAGE_LABELS[requiredPage]} page is not available to the{' '}
           <span className="font-semibold text-text-primary">
             {user ? ROLE_LABELS[user.role] : 'current'}
           </span>{' '}

@@ -13,26 +13,8 @@ interface AttemptRecord {
   firstAttemptAt: number;
 }
 
-interface SessionStore {
-  set(user: SessionUser): void;
-  get(): SessionUser | null;
-  clear(): void;
-}
-
-function createSessionStore(): SessionStore {
-  let currentUser: SessionUser | null = null;
-
-  return {
-    set(user) {
-      currentUser = user;
-    },
-    get() {
-      return currentUser;
-    },
-    clear() {
-      currentUser = null;
-    },
-  };
+export interface SessionView {
+  user: SessionUser | null;
 }
 
 /** Maps a database row to the object that is safe to send to the renderer. */
@@ -41,13 +23,14 @@ export function toSessionUser(row: UserRow): SessionUser {
     id: row.id,
     username: row.username,
     fullName: row.full_name,
-    role: row.role as UserRole,
+    role: row.role,
     mustChangePassword: row.must_change_password === 1,
   };
 }
 
 export function createAuthService(users: UserRepository) {
-  const session = createSessionStore();
+  // The session is a single object so callers can share the reference.
+  const session: SessionView = { user: null };
   const failedAttempts = new Map<string, AttemptRecord>();
 
   function assertNotLocked(usernameKey: string): void {
@@ -83,82 +66,81 @@ export function createAuthService(users: UserRepository) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  function getCurrentUser(): SessionUser | null {
-    return session.get();
-  }
+  return {
+    session,
 
-  /** Throws if there is no session, or if the role is not in `allowedRoles`. */
-  function requireUser(allowedRoles?: UserRole[]): SessionUser {
-    const user = session.get();
-    if (!user) {
-      throw new AppError('UNAUTHENTICATED', 'Please log in to continue');
-    }
-    if (allowedRoles && !allowedRoles.includes(user.role)) {
-      throw new AppError('FORBIDDEN', 'Your role does not allow this action');
-    }
-    return user;
-  }
+    getCurrentUser(): SessionUser | null {
+      return session.user;
+    },
 
-  async function login(username: string, password: string): Promise<SessionUser> {
-    const usernameKey = username.trim().toLowerCase();
-    assertNotLocked(usernameKey);
+    /** Throws if there is no session, or if the role is not in `allowedRoles`. */
+    requireUser(allowedRoles?: UserRole[]): SessionUser {
+      const user = session.user;
+      if (!user) {
+        throw new AppError('UNAUTHENTICATED', 'Please log in to continue');
+      }
+      if (allowedRoles && !allowedRoles.includes(user.role)) {
+        throw new AppError('FORBIDDEN', 'Your role does not allow this action');
+      }
+      return user;
+    },
 
-    const row = users.findByUsername(username);
-    const passwordMatches = row ? await verifyPassword(password, row.password_hash) : false;
+    async login(username: string, password: string): Promise<SessionUser> {
+      const usernameKey = username.trim().toLowerCase();
+      assertNotLocked(usernameKey);
 
-    if (!row || !passwordMatches) {
-      recordFailedAttempt(usernameKey);
-      await wait(FAILED_ATTEMPT_DELAY_MS);
-      logWarn(`Failed login attempt for username "${usernameKey}"`);
-      throw new AppError('INVALID_CREDENTIALS', 'Wrong username or password');
-    }
+      const row = users.findByUsername(username);
+      const passwordMatches = row ? await verifyPassword(password, row.password_hash) : false;
 
-    if (row.active !== 1) {
-      logWarn(`Disabled account tried to log in: "${usernameKey}"`);
-      throw new AppError('ACCOUNT_DISABLED', 'This account is disabled. Contact the owner.');
-    }
+      if (!row || !passwordMatches) {
+        recordFailedAttempt(usernameKey);
+        await wait(FAILED_ATTEMPT_DELAY_MS);
+        logWarn(`Failed login attempt for username "${usernameKey}"`);
+        throw new AppError('INVALID_CREDENTIALS', 'Wrong username or password');
+      }
 
-    failedAttempts.delete(usernameKey);
-    users.updateLastLogin(row.id);
+      if (row.active !== 1) {
+        logWarn(`Disabled account tried to log in: "${usernameKey}"`);
+        throw new AppError('ACCOUNT_DISABLED', 'This account is disabled. Contact the owner.');
+      }
 
-    const user = toSessionUser(row);
-    session.set(user);
-    return user;
-  }
+      failedAttempts.delete(usernameKey);
+      users.updateLastLogin(row.id);
 
-  /**
-   * Changing the password also clears `must_change_password`, so a forced
-   * first-login change only ever happens once.
-   */
-  async function changePassword(
-    currentPassword: string,
-    newPassword: string,
-  ): Promise<SessionUser> {
-    const currentUser = requireUser();
-    const row = users.findById(currentUser.id);
+      const user = toSessionUser(row);
+      session.user = user;
+      return user;
+    },
 
-    if (!row) {
-      throw new AppError('NOT_FOUND', 'This user no longer exists');
-    }
+    /**
+     * Changing the password also clears `must_change_password`, so a forced
+     * first-login change only ever happens once.
+     */
+    async changePassword(currentPassword: string, newPassword: string): Promise<SessionUser> {
+      const currentUser = this.requireUser();
+      const row = users.findById(currentUser.id);
 
-    const matches = await verifyPassword(currentPassword, row.password_hash);
-    if (!matches) {
-      throw new AppError('INVALID_CREDENTIALS', 'Current password is not correct');
-    }
+      if (!row) {
+        throw new AppError('NOT_FOUND', 'This user no longer exists');
+      }
 
-    const newHash = await hashPassword(newPassword);
-    users.updatePasswordHash(row.id, newHash, false);
+      const matches = await verifyPassword(currentPassword, row.password_hash);
+      if (!matches) {
+        throw new AppError('INVALID_CREDENTIALS', 'Current password is not correct');
+      }
 
-    const updated: SessionUser = { ...toSessionUser(row), mustChangePassword: false };
-    session.set(updated);
-    return updated;
-  }
+      const newHash = await hashPassword(newPassword);
+      users.updatePasswordHash(row.id, newHash, false);
 
-  function logout(): void {
-    session.clear();
-  }
+      const updated: SessionUser = { ...toSessionUser(row), mustChangePassword: false };
+      session.user = updated;
+      return updated;
+    },
 
-  return { login, logout, getCurrentUser, requireUser, changePassword };
+    logout(): void {
+      session.user = null;
+    },
+  };
 }
 
 export type AuthService = ReturnType<typeof createAuthService>;

@@ -5,6 +5,7 @@ import path from 'node:path';
 export type AppDatabase = Database.Database;
 
 let database: AppDatabase | null = null;
+let databasePath: string | null = null;
 
 /**
  * Opens (or creates) the SQLite file and applies safe defaults.
@@ -20,6 +21,7 @@ export function openDatabase(filePath: string): AppDatabase {
   db.pragma('busy_timeout = 5000');
 
   database = db;
+  databasePath = filePath;
   return db;
 }
 
@@ -30,9 +32,17 @@ export function getDatabase(): AppDatabase {
   return database;
 }
 
+export function getDatabasePath(): string {
+  if (!databasePath) {
+    throw new Error('Database is not open.');
+  }
+  return databasePath;
+}
+
 export function closeDatabase(): void {
   if (database) {
     database.close();
     database = null;
+    databasePath = null;
   }
 }

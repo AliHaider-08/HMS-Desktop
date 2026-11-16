@@ -1,4 +1,4 @@
-import { forwardRef, useState, type InputHTMLAttributes } from 'react';
+import { forwardRef, useState, type InputHTMLAttributes, type TextareaHTMLAttributes } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { cn } from '../utils/cn';
 
@@ -6,11 +6,12 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string;
   error?: string;
   hint?: string;
+  rightAddon?: string;
 }
 
 /** 40px high, light border, red focus ring (design.md section 7). */
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { label, error, hint, className, id, type = 'text', ...rest },
+  { label, error, hint, className, id, type = 'text', rightAddon, ...rest },
   ref,
 ) {
   const [isRevealed, setIsRevealed] = useState(false);
@@ -37,10 +38,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
             'disabled:bg-background disabled:text-text-secondary',
             error ? 'border-status-cancelled' : 'border-border',
             isPassword && 'pr-10',
+            rightAddon && 'pr-12',
             className,
           )}
           {...rest}
         />
+
+        {rightAddon && !isPassword && (
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-caption text-text-secondary">
+            {rightAddon}
+          </span>
+        )}
 
         {isPassword && (
           <button
@@ -63,6 +71,46 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         <p id={`${inputId}-hint`} className="text-caption text-text-secondary">
           {hint}
         </p>
+      ) : null}
+    </div>
+  );
+});
+
+interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label: string;
+  error?: string;
+  hint?: string;
+}
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+  { label, error, hint, className, id, ...rest },
+  ref,
+) {
+  const areaId = id ?? `textarea-${label.toLowerCase().replace(/\s+/g, '-')}`;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={areaId} className="text-caption text-text-secondary">
+        {label}
+      </label>
+      <textarea
+        ref={ref}
+        id={areaId}
+        aria-invalid={Boolean(error)}
+        className={cn(
+          'min-h-[80px] w-full rounded-control border bg-surface px-3 py-2 text-body text-text-primary',
+          'focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25',
+          error ? 'border-status-cancelled' : 'border-border',
+          className,
+        )}
+        {...rest}
+      />
+      {error ? (
+        <p role="alert" className="text-caption text-status-cancelled">
+          {error}
+        </p>
+      ) : hint ? (
+        <p className="text-caption text-text-secondary">{hint}</p>
       ) : null}
     </div>
   );

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import type { PageKey } from '../types/api';
+import type { Capability, PageKey } from '../types/api';
 import { useAuth } from '../hooks/useAuth';
 import { AccessDenied } from '../pages/AccessDenied/AccessDenied';
 
@@ -8,13 +8,15 @@ interface ProtectedRouteProps {
   children: ReactNode;
   /** Page the user must be allowed to open. Omit for "any signed-in user". */
   requiredPage?: PageKey;
+  /** Optional extra capability check for read-only pages (e.g. write actions). */
+  requiredCapability?: Capability;
   /** The change-password screen itself must stay reachable during a forced change. */
   allowPendingPasswordChange?: boolean;
 }
 
 /**
  * Route guard for the UI. It is a convenience only — the main process
- * re-checks the session and role on every IPC call (Rules.md section 7).
+ * re-checks the session, role and capability on every IPC call (Rules.md section 7).
  */
 export function ProtectedRoute({
   children,

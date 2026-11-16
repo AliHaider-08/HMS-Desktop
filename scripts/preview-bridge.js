@@ -1,98 +1,104 @@
 /**
  * Injected into the preview HTML only (development helper).
- * Emulates `window.api.auth` from electron/preload.ts in the browser so the
- * login UI can be reviewed without building the Windows app.
- * Demo users live in memory here; this script is never shipped inside the app.
+ * Provides the same `window.api` surface as electron/preload.ts, forwarding every
+ * call to the preview server, which runs the real main-process registry.
+ * This file is never shipped inside the app.
  */
 (function installPreviewBridge() {
   if (window.api) return;
 
-  const users = [
-    {
-      id: 1,
-      username: 'admin',
-      password: 'admin123',
-      fullName: 'Shop Owner',
-      role: 'admin',
-      mustChangePassword: true,
-    },
-    {
-      id: 2,
-      username: 'cashier',
-      password: 'cashier123',
-      fullName: 'Counter Staff',
-      role: 'cashier',
-      mustChangePassword: false,
-    },
-    {
-      id: 3,
-      username: 'manager',
-      password: 'manager123',
-      fullName: 'Shift Manager',
-      role: 'manager',
-      mustChangePassword: false,
-    },
-  ];
+  async function call(channel) {
+    return async (...args) => {
+      const payload = args.length === 1 ? args[0] : args.length === 0 ? undefined : args;
+      const response = await fetch('/__preview/ipc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, args: payload }),
+      });
 
-  const ROLE_PAGES = {
-    admin: ['home', 'users', 'settings', 'reports'],
-    cashier: ['home'],
-    manager: ['home', 'reports'],
-  };
+      if (!response.ok) {
+        return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Preview server is not responding.' } };
+      }
 
-  let session = null;
-
-  const publicUser = () =>
-    session && {
-      id: session.id,
-      username: session.username,
-      fullName: session.fullName,
-      role: session.role,
-      mustChangePassword: session.mustChangePassword,
+      return response.json();
     };
-
-  const ok = (data) => ({ ok: true, data });
-  const fail = (code, message) => ({ ok: false, error: { code, message } });
-
-  async function call(channel, args) {
-    const response = await fetch('/__preview/ipc', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel, args }),
-    });
-    return response.json();
   }
 
   window.api = {
     auth: {
-      // Credential checks run on the preview server; the session is created here.
-      async login(input) {
-        const result = await call('auth:login', input);
-        if (result.ok) session = users.find((user) => user.id === result.data.id) ?? null;
-        return result;
-      },
-      async logout() {
-        session = null;
-        return call('auth:logout');
-      },
-      async getSession() {
-        return ok(publicUser());
-      },
-      async getPermissions() {
-        return ok(session ? { role: session.role, pages: ROLE_PAGES[session.role] } : null);
-      },
-      async changePassword(input) {
-        const result = await call('auth:change-password', {
-          ...input,
-          username: session ? session.username : '',
-        });
-        if (result.ok && session) {
-          session.password = input.newPassword;
-          session.mustChangePassword = false;
-          return ok(publicUser());
-        }
-        return result;
-      },
+      login: call('auth:login'),
+      logout: call('auth:logout'),
+      getSession: call('auth:session'),
+      changePassword: call('auth:change-password'),
+      getPermissions: call('auth:permissions'),
+    },
+    menu: {
+      listCategories: call('menu:categories'),
+      saveCategory: call('menu:category-save'),
+      deleteCategory: call('menu:category-delete'),
+      listItems: call('menu:items'),
+      saveItem: call('menu:item-save'),
+      deleteItem: call('menu:item-delete'),
+      toggleItem: call('menu:item-toggle'),
+    },
+    orders: {
+      create: call('orders:create'),
+      list: call('orders:list'),
+      get: call('orders:get'),
+      updateStatus: call('orders:status'),
+      cancel: call('orders:cancel'),
+      invoice: call('orders:invoice'),
+      markPrinted: call('orders:mark-printed'),
+      print: call('orders:print'),
+      savePdf: call('orders:pdf'),
+    },
+    staff: {
+      listWaiters: call('staff:waiters'),
+      saveWaiter: call('staff:waiter-save'),
+      removeWaiter: call('staff:waiter-delete'),
+      listDeliveryBoys: call('staff:delivery-boys'),
+      saveDeliveryBoy: call('staff:delivery-boy-save'),
+      removeDeliveryBoy: call('staff:delivery-boy-delete'),
+      listAttendance: call('staff:attendance'),
+      setAttendance: call('staff:attendance-set'),
+      listAdvances: call('staff:advances'),
+      addAdvance: call('staff:advance-add'),
+      removeAdvance: call('staff:advance-delete'),
+      salarySlip: call('staff:salary-slip'),
+      paySalary: call('staff:salary-pay'),
+      salaryPayments: call('staff:salary-payments'),
+    },
+    vehicles: {
+      list: call('vehicles:list'),
+      save: call('vehicles:save'),
+      remove: call('vehicles:delete'),
+      assign: call('vehicles:assign'),
+      assignments: call('vehicles:assignments'),
+      expenses: call('vehicles:expenses'),
+      addExpense: call('vehicles:expense-add'),
+      removeExpense: call('vehicles:expense-delete'),
+    },
+    reports: {
+      dashboard: call('reports:dashboard'),
+      range: call('reports:range'),
+      salarySummary: call('reports:salary'),
+      deliveryReport: call('reports:delivery'),
+      vehicleExpenses: call('reports:vehicle-expenses'),
+      exportCsv: call('reports:export'),
+    },
+    settings: {
+      get: call('settings:get'),
+      save: call('settings:save'),
+      pickLogo: call('settings:pick-logo'),
+      listBackups: call('settings:backup-list'),
+      createBackup: call('settings:backup-create'),
+      restoreBackup: call('settings:backup-restore'),
+    },
+    users: {
+      list: call('users:list'),
+      save: call('users:save'),
+      setActive: call('users:set-active'),
+      resetPassword: call('users:reset-password'),
     },
   };
 })();

@@ -5,11 +5,20 @@ import { RouteError } from './components/RouteError';
 import { LoginPage } from './pages/Login/LoginPage';
 import { ChangePasswordPage } from './pages/Login/ChangePasswordPage';
 import { DashboardPage } from './pages/Dashboard/DashboardPage';
-import { PlaceholderPage } from './pages/Placeholder/PlaceholderPage';
+import { MenuPage } from './pages/Menu/MenuPage';
+import { OrdersPage } from './pages/Orders/OrdersPage';
+import { NewOrderPage } from './pages/Orders/NewOrderPage';
+import { InvoicePage } from './pages/Invoice/InvoicePage';
+import { StaffPage } from './pages/Staff/StaffPage';
+import { VehiclesPage } from './pages/Vehicles/VehiclesPage';
+import { ReportsPage } from './pages/Reports/ReportsPage';
+import { SettingsPage } from './pages/Settings/SettingsPage';
+import { UsersPage } from './pages/Users/UsersPage';
 
 /**
  * Hash routing is used because the packaged app runs from file://.
- * Every page inside the layout is wrapped in ProtectedRoute with its PageKey.
+ * Every page inside the layout is wrapped in ProtectedRoute with its PageKey;
+ * the main process re-checks the same permission on every IPC call.
  */
 export const router = createHashRouter([
   { path: '/login', element: <LoginPage /> },
@@ -40,18 +49,58 @@ export const router = createHashRouter([
         ),
       },
       {
-        path: 'reports',
+        path: 'menu',
         element: (
-          <ProtectedRoute requiredPage="reports">
-            <PlaceholderPage page="reports" />
+          <ProtectedRoute requiredPage="menu">
+            <MenuPage />
           </ProtectedRoute>
         ),
       },
       {
-        path: 'users',
+        path: 'orders',
         element: (
-          <ProtectedRoute requiredPage="users">
-            <PlaceholderPage page="users" />
+          <ProtectedRoute requiredPage="orders">
+            <OrdersPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'orders/new',
+        element: (
+          <ProtectedRoute requiredPage="orders">
+            <NewOrderPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'invoice/:id',
+        element: (
+          <ProtectedRoute requiredPage="orders">
+            <InvoicePage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'staff',
+        element: (
+          <ProtectedRoute requiredPage="staff">
+            <StaffPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'vehicles',
+        element: (
+          <ProtectedRoute requiredPage="vehicles">
+            <VehiclesPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'reports',
+        element: (
+          <ProtectedRoute requiredPage="reports">
+            <ReportsPage />
           </ProtectedRoute>
         ),
       },
@@ -59,7 +108,15 @@ export const router = createHashRouter([
         path: 'settings',
         element: (
           <ProtectedRoute requiredPage="settings">
-            <PlaceholderPage page="settings" />
+            <SettingsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'users',
+        element: (
+          <ProtectedRoute requiredPage="users">
+            <UsersPage />
           </ProtectedRoute>
         ),
       },

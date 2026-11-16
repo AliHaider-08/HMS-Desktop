@@ -55,8 +55,9 @@ async function main() {
 
   const db = openDatabase(dbFile);
 
-  await check('first run applies both migrations', () => {
-    assert.equal(runMigrations(db, migrationsDir), 2);
+  await check('first run applies every migration', () => {
+    // 001..007 must all run on a fresh database.
+    assert.equal(runMigrations(db, migrationsDir), 7);
   });
 
   await check('second run applies nothing (migrations are idempotent)', () => {
@@ -67,14 +68,36 @@ async function main() {
   const users = createUserRepository(db);
   const settings = createSettingsRepository(db);
 
-  await check('users and settings tables exist', () => {
+  await check('all documented tables exist', () => {
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all()
       .map((row) => row.name);
-    assert.ok(tables.includes('users'));
-    assert.ok(tables.includes('settings'));
-    assert.ok(tables.includes('schema_migrations'));
+
+    // docs/architecture.md section 4
+    const expected = [
+      'users',
+      'settings',
+      'categories',
+      'items',
+      'customers',
+      'orders',
+      'order_items',
+      'invoices',
+      'waiters',
+      'delivery_boys',
+      'attendance',
+      'advances',
+      'salary_payments',
+      'vehicles',
+      'vehicle_assignments',
+      'vehicle_expenses',
+      'schema_migrations',
+    ];
+
+    for (const table of expected) {
+      assert.ok(tables.includes(table), `missing table: ${table}`);
+    }
   });
 
   await check('default settings are seeded', () => {
@@ -203,10 +226,27 @@ async function main() {
   });
 
   await check('role page permissions come from the main process map', () => {
-    assert.deepEqual(getRolePermissions('cashier').pages, ['home']);
-    assert.deepEqual(getRolePermissions('manager').pages, ['home', 'reports']);
-    assert.deepEqual(getRolePermissions('admin').pages, ['home', 'users', 'settings', 'reports']);
+    assert.deepEqual(getRolePermissions('cashier').pages, ['home', 'orders', 'menu']);
+    assert.deepEqual(getRolePermissions('manager').pages, [
+      'home',
+      'orders',
+      'menu',
+      'staff',
+      'vehicles',
+      'reports',
+    ]);
+    assert.deepEqual(getRolePermissions('admin').pages, [
+      'home',
+      'orders',
+      'menu',
+      'staff',
+      'vehicles',
+      'reports',
+      'users',
+      'settings',
+    ]);
     assert.equal(roleHasPage('cashier', 'settings'), false);
+    assert.equal(roleHasPage('cashier', 'staff'), false);
     assert.equal(roleHasPage('admin', 'settings'), true);
   });
 
