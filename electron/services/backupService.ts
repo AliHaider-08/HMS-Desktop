@@ -26,11 +26,13 @@ export function createBackupService(
     mkdirSync(backupDirectory, { recursive: true });
   }
 
+  /** Milliseconds are included so two backups in the same second cannot overwrite each other. */
   function fileNameFor(reason: 'auto' | 'manual', when: Date): string {
     const pad = (value: number) => String(value).padStart(2, '0');
     const stamp =
       `${when.getFullYear()}${pad(when.getMonth() + 1)}${pad(when.getDate())}-` +
-      `${pad(when.getHours())}${pad(when.getMinutes())}${pad(when.getSeconds())}`;
+      `${pad(when.getHours())}${pad(when.getMinutes())}${pad(when.getSeconds())}` +
+      `-${String(when.getMilliseconds()).padStart(3, '0')}`;
     return `fastfood-${reason}-${stamp}.db`;
   }
 
@@ -75,7 +77,13 @@ export function createBackupService(
         ensureDirectory();
         writer.checkpoint();
 
-        const target = path.join(backupDirectory, fileNameFor(reason, new Date()));
+        // Same-second backups get a counter suffix instead of overwriting each other.
+        const baseName = fileNameFor(reason, new Date()).replace(/\.db$/, '');
+        let target = path.join(backupDirectory, `${baseName}.db`);
+        for (let suffix = 2; existsSync(target); suffix += 1) {
+          target = path.join(backupDirectory, `${baseName}-${suffix}.db`);
+        }
+
         copyFileSync(databaseFile, target);
 
         if (reason === 'auto') pruneOldAutoBackups();

@@ -34,11 +34,12 @@ export interface HandlerDefinition<TInput, TOutput> {
 /**
  * Erased form of a handler used by the registry map. Inputs are validated at
  * runtime by each definition's Zod schema, so the map is intentionally untyped.
+ * Narrowing these type arguments breaks every handler on variance, so they stay
+ * as the only `any` in the codebase (Rules.md: no `any` in app logic).
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any -- single erased shape, see comment above */
 export type AnyHandlerDefinition = HandlerDefinition<any, any>;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type HandlerRegistry = Record<string, AnyHandlerDefinition>;
 
 export function ok<T>(data: T): ApiResult<T> {

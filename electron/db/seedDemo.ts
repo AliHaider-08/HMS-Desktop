@@ -8,7 +8,7 @@ import { toSqlDate } from '../utils/datetime';
 import { logInfo } from '../services/logger';
 
 /**
- * Optional demo data (`npm run seed:demo` or SEED_DEMO=1).
+ * Optional demo data (SEED_DEMO=1).
  * Never runs unless explicitly requested, so a real shop starts with an empty menu.
  */
 export async function seedDemoData(deps: {

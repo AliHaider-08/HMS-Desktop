@@ -1,10 +1,10 @@
 # Gul Khan Fast Food — Fast Food Management Desktop App
 
-Offline Windows desktop app (Electron + React + TypeScript + Tailwind + SQLite) for taking
-orders, printing invoices and keeping staff, vehicle and sales records.
+Offline Windows desktop app (Electron + React + TypeScript + Tailwind + SQLite) for taking orders,
+printing invoices, and keeping staff, vehicle, salary and sales records.
 
-**Status: Phase 1 complete — project setup, database, login and roles.**
-See `docs/phases.md` for the roadmap and `docs/memory.md` for current progress.
+**All six phases in `docs/phases.md` are implemented.** See `docs/memory.md` for current status,
+decisions and known gaps.
 
 ---
 
@@ -22,83 +22,115 @@ No internet is needed after installation. All data stays on the computer.
 npm install
 ```
 
-`better-sqlite3` and `bcrypt` both ship prebuilt N-API binaries, so nothing is compiled on a
-normal machine. If you ever see a native-binding error, run:
+`better-sqlite3` and `bcrypt` ship prebuilt N-API binaries, so nothing is compiled on a normal
+machine. If you ever see a native-binding error:
 
 ```bash
 npm run rebuild:native
 ```
 
-## 3. Run the app (development)
+## 3. Run the app
 
 ```bash
-npm run dev
+npm run dev        # Vite + Electron window with hot reload
+npm run build      # compile main process + production renderer
+npm start          # run Electron against the production build
+npm run dist:win   # Windows NSIS installer in release/
 ```
 
-This compiles the Electron main process, starts Vite on port 5173 and opens the desktop window
-with DevTools. Electron loads `http://localhost:5173`.
+### Commands
 
-Other useful commands:
-
-| Command             | What it does                                               |
-| ------------------- | ---------------------------------------------------------- |
-| `npm run dev`       | Vite + Electron with hot reload for the UI                 |
-| `npm run typecheck` | TypeScript strict check for renderer, config and main      |
-| `npm run lint`      | ESLint                                                     |
-| `npm run format`    | Prettier                                                   |
-| `npm run test:auth` | Headless Phase 1 smoke test (DB, migrations, login, roles) |
-| `npm run build`     | Compile main process + production renderer                 |
-| `npm start`         | Run Electron against the production build                  |
-| `npm run dist:win`  | Build the Windows NSIS installer into `release/`           |
-| `npm run preview`   | UI-only browser preview (demo auth, no database)           |
+| Command             | What it does                                            |
+| ------------------- | ------------------------------------------------------- |
+| `npm run dev`       | Vite on 5173 + Electron window                          |
+| `npm run verify`    | Typecheck + lint + **all phase tests** (87 checks)      |
+| `npm run test:all`  | Build main process, then run every phase test           |
+| `npm run test:auth` | Phase 1 checks only                                     |
+| `npm run typecheck` | Strict TypeScript for renderer, config and main process |
+| `npm run lint`      | ESLint                                                  |
+| `npm run format`    | Prettier                                                |
+| `npm run preview`   | Browser-only UI preview with a throw-away demo database |
 
 ## 4. First run and sign-in
 
 1. The app creates `%APPDATA%\gul-khan-fast-food\data\fastfood.db` on first start.
 2. Migrations in `electron/db/migrations/` run automatically (numbered, applied once).
-3. A default admin is created:
-   - **username:** `admin`
-   - **password:** `admin123`
-4. The first login is forced to a **Set a new password** screen. The new password replaces the
-   factory one in the database (bcrypt hash); `must_change_password` is cleared.
+3. A default admin is created: **admin / admin123**, and the first login is forced to a
+   **Set a new password** screen.
+4. To explore with sample data instead: `SEED_DEMO=1 npm run dev` (Windows PowerShell:
+   `$env:SEED_DEMO=1; npm run dev`) — adds demo users `manager/manager123`, `cashier/cashier123`,
+   a menu, staff and a few orders.
 
-Logs (including failed logins and technical errors) are written to
-`%APPDATA%\gul-khan-fast-food\logs\app.log`.
+Logs (failed logins, errors): `%APPDATA%\gul-khan-fast-food\logs\app.log`
+Backups: `%APPDATA%\gul-khan-fast-food\backups\` (automatic on close, last 7 kept).
+PDF/CSV exports: `Documents\Gul Khan Fast Food\`.
 
-## 5. Project structure
+## 5. Features
+
+- **Login and roles** — bcrypt passwords, forced password change, 5-attempt lockout, session in
+  main-process memory only. Roles: Admin, Manager, Cashier.
+- **Dashboard** — today's sales/orders, month to date, pending deliveries, 7-day trend, recent
+  orders, vehicle document reminders.
+- **Menu** — categories and items, prices in rupees+paisa, sold-out toggle (cashiers may toggle).
+- **Orders** — New Order screen (menu grid + cart + totals), Dine-in/Takeaway/Delivery, waiter or
+  rider, discount, tax %, order notes, search and filters, status flow, cancel with confirmation.
+- **Invoice** — on-screen receipt preview, print to 80mm thermal or A4, save as PDF, reprint.
+- **Staff** — waiters and delivery boys, attendance calendar, advances, monthly salary slip with
+  per-day maths, commission for riders, salary payment record.
+- **Vehicles** — bikes/cars, number plate, assignment history, release, fuel/maintenance expenses,
+  registration/insurance expiry reminders.
+- **Reports** — daily sales, top items, deliveries, salary summary, vehicle costs, date presets,
+  CSV export (opens in Excel).
+- **Settings** — shop name/address/phone/logo, currency label, default tax %, receipt paper,
+  backup on close, manual backup and restore.
+- **Users** — admin creates cashier/manager/admin accounts, resets passwords, disables accounts;
+  the last active admin cannot be disabled.
+
+## 6. Project structure
 
 ```
-electron/            main process (window, SQLite, repositories, services, IPC)
-  ipc/               one file per module: auth.ipc.ts, ... (Phase 2+)
-  db/                connection.ts, migrate.ts, seed.ts
-  db/migrations/     numbered .sql files
-  db/repositories/   all SQL lives here (prepared statements only)
-  services/          authService, permissions, logger
+electron/            main process: window, SQLite, repositories, services, IPC
+  ipc/               one file per module + registry.ts (single dispatch point)
+  db/migrations/     numbered .sql files (001 … 007)
+  db/repositories/   all SQL, prepared statements only
+  db/seed.ts         default admin; db/seedDemo.ts optional demo data
+  services/          auth, permissions, catalog, orders, staff, vehicles,
+                     reports, csv, print, backup, settings, users, logger
 src/                 React renderer (UI only, never touches SQLite)
   components/ layouts/ pages/ hooks/ store/ types/ utils/ styles/
-docs/                PRD, architecture, Rules, phases, design, memory
-scripts/             dev launcher, asset copy, smoke test, preview server
+docs/                PRD, architecture, Rules, phases, design, memory, checklists
+scripts/             dev launcher, preview server, test harness and phase tests
 ```
 
-Renderer → `window.api` → preload → IPC → main process → SQLite.
+Renderer → `window.api` → preload → IPC → **registry** → service → repository → SQLite.
 
-## 6. Roles
+Every channel declares its role/capability and Zod schema in `electron/ipc/*.ipc.ts`, and
+`electron/ipc/registry.ts` enforces: authentication → role → capability → validation → handler.
 
-| Role    | Can open (Phase 1 permission map)   |
-| ------- | ----------------------------------- |
-| Admin   | Dashboard, Users, Reports, Settings |
-| Manager | Dashboard, Reports                  |
-| Cashier | Dashboard                           |
+## 7. Roles
 
-The map lives in `electron/services/permissions.ts`. The renderer asks for it over IPC, and the
-main process re-checks the session on every call — the UI guard is only a convenience.
+| Page      | Admin | Manager | Cashier                |
+| --------- | ----- | ------- | ---------------------- |
+| Dashboard | ✓     | ✓       | ✓                      |
+| Orders    | ✓     | ✓       | ✓                      |
+| Menu      | ✓     | ✓       | read + sold-out toggle |
+| Staff     | ✓     | ✓       | —                      |
+| Vehicles  | ✓     | ✓       | —                      |
+| Reports   | ✓     | ✓       | —                      |
+| Users     | ✓     | —       | —                      |
+| Settings  | ✓     | —       | —                      |
 
-## 7. Security rules followed
+Cashiers can read the staff lists because order entry needs waiter/rider names, but cannot write.
 
-- `contextIsolation: true`, `nodeIntegration: false`
-- No database access from React; prepared statements only
-- bcrypt hashes, no plain-text passwords ever stored or returned
-- Every IPC reply is `{ ok: true, data }` or `{ ok: false, error: { code, message } }`
-- Zod validation in the form **and** in the main process
-- Errors logged to `logs/app.log`, friendly message shown to the user
-- 5 wrong attempts lock a username for 5 minutes
+## 8. Rules honoured
+
+- `contextIsolation: true`, `nodeIntegration: false`; no DB access from React.
+- Prepared statements only; no `any`; money is integer **paisa** everywhere.
+- Dates stored as `YYYY-MM-DD HH:mm:ss`.
+- Every IPC reply is `{ ok: true, data }` or `{ ok: false, error: { code, message } }`; friendly
+  messages reach the UI, technical detail goes to `logs/app.log`.
+- Zod validation in the form **and** in the main process.
+- Transactions for order + items + invoice, and for settings writes.
+- Soft delete (`active`) for items, categories, staff and vehicles.
+- Order items snapshot name/price, so price changes never alter old invoices.
+- Error Boundary plus route error element; confirmation dialogs for destructive actions.
