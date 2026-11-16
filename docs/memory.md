@@ -43,12 +43,12 @@ Fast Food Management Desktop App (Electron + React + SQLite)
 
 ## Verification (headless)
 `npm run verify` runs typecheck + lint + all phase tests.
-Last result: **87 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
+Last result: **88 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
 
 | Suite | Checks |
 | --- | --- |
 | Phase 1 (`scripts/auth-smoke-test.mjs`) | 20 |
-| Phase 2 (`scripts/test-phase2.mjs`) | 14 |
+| Phase 2 (`scripts/test-phase2.mjs`) | 15 |
 | Phase 3 (`scripts/test-phase3.mjs`) | 18 |
 | Phase 4 (`scripts/test-phase4.mjs`) | 11 |
 | Phase 5 (`scripts/test-phase5.mjs`) | 13 |
@@ -99,7 +99,7 @@ Last result: **87 checks passed, 0 failed** (`npm run test:all`), stable across 
 - Log rotation is not implemented (`logs/app.log` grows; small file, low risk).
 
 ## Next Steps
-1. `npm install`, then `npm run verify` on the shop PC (expect 87 checks passed).
+1. `npm install`, then `npm run verify` on the shop PC (expect 88 checks passed).
 2. `npm run dev` (optionally `SEED_DEMO=1` for sample data) and work through the manual checklist.
 3. Confirm the thermal printer and the tax question (FBR/PRA) with the owner.
 4. `npm run dist:win`, install on a clean PC, re-test login, order + print, backup/restore.

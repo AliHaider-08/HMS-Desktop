@@ -1,7 +1,7 @@
 # Manual Test Checklist — Phases 2 to 6
 
 Run `npm run dev` (or install the Windows build) and walk through this list before handover.
-Everything below was verified headlessly (87 automated checks), but window, printing, dialogs and
+Everything below was verified headlessly (88 automated checks), but window, printing, dialogs and
 the installer need a real machine.
 
 Sign in as **admin** (default `admin` / `admin123`; the app forces a password change on first run).

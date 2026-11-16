@@ -157,5 +157,34 @@ await runner.check('a cashier cannot create backups', async () => {
   await harness.callFail('settings:backup-create', undefined, 'FORBIDDEN');
 });
 
+await runner.check('demo data covers vehicles, attendance and advances', async () => {
+  await harness.loginAs('admin', 'OwnerPass123');
+
+  const vehicles = await harness.callOk('vehicles:list');
+  if (vehicles.length < 2) throw new Error('demo data should include two vehicles');
+  if (!vehicles.some((vehicle) => vehicle.assignedToName)) {
+    throw new Error('one demo vehicle should be assigned to the rider');
+  }
+
+  const waiters = await harness.callOk('staff:waiters');
+  const month = new Date().toISOString().slice(0, 7);
+  const attendance = await harness.callOk('staff:attendance', {
+    personType: 'waiter',
+    personId: waiters[0].id,
+    month,
+  });
+
+  if (attendance.length === 0)
+    throw new Error('demo data should include attendance for this month');
+
+  const advances = await harness.callOk('staff:advances', {
+    personType: 'waiter',
+    personId: waiters[0].id,
+    month,
+  });
+
+  if (advances.length === 0) throw new Error('demo data should include an advance');
+});
+
 harness.cleanup();
 runner.finish();

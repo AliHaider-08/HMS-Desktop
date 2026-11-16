@@ -120,6 +120,7 @@ await load('db/seedDemo.js').seedDemoData({
   catalog: repos.catalog,
   orders: repos.orders,
   staff: repos.staff,
+  vehicles: repos.vehicles,
   sequences: repos.sequences,
 });
 

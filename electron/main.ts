@@ -78,6 +78,7 @@ async function bootstrapServices(): Promise<void> {
       catalog: catalogRepo,
       orders: ordersRepo,
       staff: staffRepo,
+      vehicles: vehiclesRepo,
       sequences,
     });
   }

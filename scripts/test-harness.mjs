@@ -160,6 +160,7 @@ export function createHarness({ withDemoData = true } = {}) {
         catalog: repositories.catalog,
         orders: repositories.orders,
         staff: repositories.staff,
+        vehicles: repositories.vehicles,
         sequences: repositories.sequences,
       });
     }

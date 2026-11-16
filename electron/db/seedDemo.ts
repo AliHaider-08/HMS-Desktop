@@ -2,6 +2,7 @@ import type { UserRepository } from './repositories/userRepository';
 import type { CatalogRepository } from './repositories/catalogRepository';
 import type { OrdersRepository } from './repositories/ordersRepository';
 import type { StaffRepository } from './repositories/staffRepository';
+import type { VehiclesRepository } from './repositories/vehiclesRepository';
 import type { SequenceRepository } from './repositories/sequenceRepository';
 import { hashPassword } from '../utils/password';
 import { toSqlDate } from '../utils/datetime';
@@ -16,9 +17,10 @@ export async function seedDemoData(deps: {
   catalog: CatalogRepository;
   orders: OrdersRepository;
   staff: StaffRepository;
+  vehicles: VehiclesRepository;
   sequences: SequenceRepository;
 }): Promise<void> {
-  const { users, catalog, orders, staff, sequences } = deps;
+  const { users, catalog, orders, staff, vehicles, sequences } = deps;
 
   if (catalog.listItems().length > 0) {
     logInfo('Demo data skipped: the menu already has items');
@@ -105,6 +107,65 @@ export async function seedDemoData(deps: {
     active: true,
   });
 
+  // Two bikes with realistic document dates: one expiring soon, one already expired.
+  const bikeId = vehicles.create({
+    type: 'bike',
+    plateNo: 'ICT-1234',
+    model: 'Honda CG 125',
+    color: 'Red',
+    registrationExpiry: toSqlDate(new Date(Date.now() + 14 * 86_400_000)),
+    insuranceExpiry: toSqlDate(new Date(Date.now() - 3 * 86_400_000)),
+    active: true,
+  });
+
+  vehicles.startAssignment(bikeId, riderId, toSqlDate(new Date(Date.now() - 40 * 86_400_000)));
+  staff.setVehicle(riderId, bikeId);
+
+  vehicles.create({
+    type: 'car',
+    plateNo: 'ICT-7788',
+    model: 'Suzuki Alto',
+    color: 'White',
+    registrationExpiry: toSqlDate(new Date(Date.now() + 240 * 86_400_000)),
+    insuranceExpiry: toSqlDate(new Date(Date.now() + 120 * 86_400_000)),
+    active: true,
+  });
+
+  // This month's attendance and a couple of expenses so staff/report pages look real.
+  const thisMonth = toSqlDate(new Date()).slice(0, 7);
+  const daysSoFar = Number(toSqlDate(new Date()).slice(8, 10));
+
+  for (let day = 1; day <= daysSoFar; day += 1) {
+    const date = `${thisMonth}-${String(day).padStart(2, '0')}`;
+    const status = day % 7 === 0 ? 'leave' : day % 5 === 0 ? 'half_day' : 'present';
+    staff.setAttendance({ personType: 'waiter', personId: waiterId, date, status });
+    staff.setAttendance({ personType: 'delivery_boy', personId: riderId, date, status: 'present' });
+  }
+
+  staff.addAdvance({
+    personType: 'waiter',
+    personId: waiterId,
+    amount: 500_000,
+    date: `${thisMonth}-05`,
+    note: 'Bike repair',
+  });
+
+  vehicles.addExpense({
+    vehicleId: bikeId,
+    type: 'fuel',
+    amount: 180_000,
+    date: `${thisMonth}-0${Math.min(daysSoFar, 3)}`,
+    note: 'Petrol',
+  });
+
+  vehicles.addExpense({
+    vehicleId: bikeId,
+    type: 'maintenance',
+    amount: 350_000,
+    date: `${thisMonth}-0${Math.min(daysSoFar, 6)}`,
+    note: 'Chain and engine oil',
+  });
+
   const admin = users.findByUsername('admin');
   const createdBy = admin?.id ?? 1;
 
@@ -164,5 +225,7 @@ export async function seedDemoData(deps: {
     });
   }
 
-  logInfo('Demo data seeded: 4 categories, 9 items, 2 waiters, 1 rider, 6 orders');
+  logInfo(
+    'Demo data seeded: 4 categories, 9 items, 2 waiters, 1 rider, 2 vehicles, attendance, 6 orders',
+  );
 }
