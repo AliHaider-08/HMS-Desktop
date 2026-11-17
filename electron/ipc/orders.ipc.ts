@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { CHANNELS, type NewOrderInput, type OrderStatus } from '../../src/types/api';
 import { newOrderSchema, orderFilterSchema } from '../../src/types/schemas';
 import type { OrdersService } from '../services/ordersService';
+import { roleHasCapability } from '../services/permissions';
+import { AppError } from '../utils/errors';
 import type { PrintService } from '../services/printService';
 import type { HandlerContext, HandlerRegistry } from './registry';
 
@@ -33,8 +35,19 @@ export function ordersHandlers(orders: OrdersService, print: PrintService): Hand
         id: z.number().int().positive(),
         status: z.enum(['pending', 'preparing', 'ready', 'delivered', 'cancelled']),
       }),
-      handler: (input: { id: number; status: OrderStatus }) =>
-        orders.updateStatus(input.id, input.status),
+      handler: (input: { id: number; status: OrderStatus }, context: HandlerContext) => {
+        // 'orders:write' also lets a cashier move an order along, but cancelling is a
+        // separate capability (electron/services/permissions.ts). Without this check a
+        // cashier could cancel through the status channel by bypassing the hidden button.
+        if (
+          input.status === 'cancelled' &&
+          !roleHasCapability(context.user.role, 'orders:cancel')
+        ) {
+          throw new AppError('FORBIDDEN', 'Your role does not allow this action');
+        }
+
+        return orders.updateStatus(input.id, input.status);
+      },
     },
 
     [CHANNELS.orderCancel]: {
@@ -57,10 +70,11 @@ export function ordersHandlers(orders: OrdersService, print: PrintService): Hand
     [CHANNELS.orderPrint]: {
       capability: 'orders:write',
       schema: z.object({ id: z.number().int().positive(), paper: paperSchema }),
+      // printService marks the invoice as printed itself; marking here as well would
+      // write the timestamp twice for one action.
       handler: async (input: { id: number; paper: '80mm' | 'a4' }) => {
         const data = orders.invoice(input.id);
         const printed = await print.printInvoice(input.id, data, input.paper);
-        if (printed) orders.markPrinted(input.id);
         return { printed };
       },
     },
@@ -71,7 +85,6 @@ export function ordersHandlers(orders: OrdersService, print: PrintService): Hand
       handler: async (input: { id: number; paper: '80mm' | 'a4' }) => {
         const data = orders.invoice(input.id);
         const path = await print.savePdf(input.id, data, input.paper);
-        if (path) orders.markPrinted(input.id);
         return { path };
       },
     },

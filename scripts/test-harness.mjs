@@ -14,6 +14,9 @@ const root = path.resolve(import.meta.dirname, '..');
 const compiled = path.join(root, 'dist-electron', 'electron');
 const load = (relative) => require(path.join(compiled, relative));
 
+/** Mirrors electron/main.ts: the month end comes from the shared date helper. */
+const { monthEnd } = load('utils/datetime.js');
+
 export function createHarness({ withDemoData = true } = {}) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gulkhan-test-'));
   const dbFile = path.join(tempDir, 'test.db');
@@ -58,7 +61,7 @@ export function createHarness({ withDemoData = true } = {}) {
     vehicles: repositories.vehicles,
     commissionForMonth: (deliveryBoyId, month) =>
       repositories.orders
-        .deliveriesByBoy(`${month}-01`, `${month}-31`)
+        .deliveriesByBoy(`${month}-01`, `${monthEnd(month)}`)
         .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
   });
 
@@ -76,16 +79,32 @@ export function createHarness({ withDemoData = true } = {}) {
     salarySummary: (month) => reportsService.salarySummary(month),
   });
 
-  const backups = createBackupService(dbFile, path.join(tempDir, 'backups'), {
-    checkpoint: () => getDatabase().pragma('wal_checkpoint(TRUNCATE)'),
-    replaceWith: () => undefined,
-  });
+  // Records instead of relaunching: the harness has no Electron app to restart.
+  const restoreCalls = [];
+
+  const backups = createBackupService(
+    dbFile,
+    path.join(tempDir, 'backups'),
+    {
+      checkpoint: () => getDatabase().pragma('wal_checkpoint(TRUNCATE)'),
+      replaceWith: (sourcePath) => {
+        restoreCalls.push(sourcePath);
+      },
+    },
+    // The harness applies every shipped migration, so it supports the highest one.
+    { supportedSchemaVersion: 7 },
+  );
 
   const { renderInvoiceHtml } = load('services/printService.js');
 
   // Printing needs a real window, so the harness stubs it the way Electron would call it.
+  // Mirrors createPrintService: the service marks the invoice itself after a
+  // successful print, which is why the IPC print handlers must NOT mark it again.
   const printStub = {
-    printInvoice: async () => true,
+    printInvoice: async (orderId) => {
+      repositories.orders.markInvoicePrinted(orderId);
+      return true;
+    },
     savePdf: async () => null,
     renderHtml: renderInvoiceHtml,
   };
@@ -186,6 +205,9 @@ export function createHarness({ withDemoData = true } = {}) {
     setup,
     cleanup,
     renderInvoiceHtml,
+    /** Backup files created by a restore attempt (the harness cannot relaunch). */
+    restoreCalls,
+    backups,
   };
 }
 

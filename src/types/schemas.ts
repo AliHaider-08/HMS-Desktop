@@ -116,6 +116,12 @@ export const newOrderSchema = z
   .refine((values) => values.type !== 'delivery' || values.customerAddress.trim() !== '', {
     message: 'Delivery address is required',
     path: ['customerAddress'],
+  })
+  // The subtotal depends on the menu prices, so this is checked again in
+  // ordersService.create; here it catches the obvious case in the form.
+  .refine((values) => values.discount >= 0, {
+    message: 'Discount cannot be negative',
+    path: ['discount'],
   });
 
 export const orderFilterSchema = z.object({

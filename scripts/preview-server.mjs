@@ -61,7 +61,7 @@ const staffService = load('services/staffService.js').createStaffService({
   vehicles: repos.vehicles,
   commissionForMonth: (deliveryBoyId, month) =>
     repos.orders
-      .deliveriesByBoy(`${month}-01`, `${month}-31`)
+      .deliveriesByBoy(`${month}-01`, `${monthEnd(month)}`)
       .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
 });
 const reportsService = load('services/reportsService.js').createReportsService({

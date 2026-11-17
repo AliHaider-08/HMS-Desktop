@@ -163,6 +163,16 @@ export function createOrdersRepository(db: AppDatabase) {
   );
 
   return {
+    /**
+     * Runs `fn` inside one SQLite transaction. Exposed so a caller can group work
+     * that spans repositories (allocating an order number and inserting the order)
+     * into a single atomic unit. If `fn` throws, everything rolls back — including
+     * the sequence rows — so a failed save never burns an ORD-/INV- number.
+     */
+    transaction<T>(fn: () => T): T {
+      return db.transaction(fn)();
+    },
+
     /** Creates the order, its items and its invoice inside one transaction. */
     create(input: {
       orderNo: string;

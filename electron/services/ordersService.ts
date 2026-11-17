@@ -68,7 +68,12 @@ export function createOrdersService(deps: {
       });
 
       const subtotal = lines.reduce((total, line) => total + line.lineTotal, 0);
-      const discount = Math.min(input.discount, subtotal);
+      // Never clamp silently: a discount larger than the bill is a data-entry mistake
+      // and the cashier must see it (Rules.md: no silent money changes).
+      if (input.discount > subtotal) {
+        throw new AppError('VALIDATION_ERROR', 'Discount subtotal se zyada nahi ho sakta.');
+      }
+      const discount = input.discount;
       const taxable = subtotal - discount;
       const tax = percentOf(taxable, input.taxPercent);
       const total = taxable + tax;
@@ -84,29 +89,35 @@ export function createOrdersService(deps: {
         throw new AppError('NOT_FOUND', 'The selected delivery boy does not exist');
       }
 
-      const orderNumber = sequences.next('order');
-      const invoiceNumber = sequences.next('invoice');
       const orderPrefix = settings.get('order_prefix') ?? 'ORD';
       const invoicePrefix = settings.get('invoice_prefix') ?? 'INV';
 
-      const orderId = orders.create({
-        orderNo: `${orderPrefix}-${String(orderNumber).padStart(5, '0')}`,
-        invoiceNo: `${invoicePrefix}-${String(invoiceNumber).padStart(5, '0')}`,
-        type: input.type,
-        status: input.status,
-        customerName: input.customerName,
-        customerPhone: input.customerPhone,
-        customerAddress: input.customerAddress,
-        waiterId: input.type === 'dine_in' ? input.waiterId : null,
-        deliveryBoyId: input.type === 'delivery' ? input.deliveryBoyId : null,
-        subtotal,
-        discount,
-        taxPercent: input.taxPercent,
-        tax,
-        total,
-        notes: input.notes,
-        createdBy,
-        items: lines,
+      // Number allocation and the insert share ONE transaction: if the insert throws,
+      // the counters roll back too and no ORD-/INV- number is burned (Rules.md: money
+      // and sequences must be atomic).
+      const orderId = orders.transaction(() => {
+        const orderNumber = sequences.next('order');
+        const invoiceNumber = sequences.next('invoice');
+
+        return orders.create({
+          orderNo: `${orderPrefix}-${String(orderNumber).padStart(5, '0')}`,
+          invoiceNo: `${invoicePrefix}-${String(invoiceNumber).padStart(5, '0')}`,
+          type: input.type,
+          status: input.status,
+          customerName: input.customerName,
+          customerPhone: input.customerPhone,
+          customerAddress: input.customerAddress,
+          waiterId: input.type === 'dine_in' ? input.waiterId : null,
+          deliveryBoyId: input.type === 'delivery' ? input.deliveryBoyId : null,
+          subtotal,
+          discount,
+          taxPercent: input.taxPercent,
+          tax,
+          total,
+          notes: input.notes,
+          createdBy,
+          items: lines,
+        });
       });
 
       logInfo(`Order created: ${orderId} (total ${total} paisa, ${lines.length} items)`);
