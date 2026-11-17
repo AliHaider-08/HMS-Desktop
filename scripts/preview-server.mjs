@@ -55,9 +55,14 @@ const repos = {
   sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
   payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
   shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
+  discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
 };
 
 const auth = load('services/authService.js').createAuthService(repos.users);
+const discountsService = load('services/discountsService.js').createDiscountsService({
+  discounts: repos.discounts,
+  users: repos.users,
+});
 const staffService = load('services/staffService.js').createStaffService({
   staff: repos.staff,
   vehicles: repos.vehicles,
@@ -84,6 +89,7 @@ const registry = buildRegistry({
     settings: repos.settings,
     staff: repos.staff,
     users: repos.users,
+    discounts: discountsService,
   }),
   staff: staffService,
   vehicles: load('services/vehiclesService.js').createVehiclesService({
@@ -124,6 +130,7 @@ const registry = buildRegistry({
     shifts: repos.shifts,
     orders: repos.orders,
   }),
+  discounts: discountsService,
 });
 
 const { seedDefaultAdmin } = load('db/seed.js');

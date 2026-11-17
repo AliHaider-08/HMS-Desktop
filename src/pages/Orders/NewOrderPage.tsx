@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Minus, Plus, Search, ShoppingBag, Trash2, X } from 'lucide-react';
+import { Minus, Plus, Search, ShieldCheck, ShoppingBag, Trash2, X } from 'lucide-react';
 import type {
   DeliveryBoy,
+  DiscountDecision,
   MenuItem,
   OrderStatus,
   OrderType,
@@ -22,6 +23,7 @@ import { Select } from '../../components/Select';
 import { PageHeader } from '../../components/PageHeader';
 import { toast } from '../../components/Toast';
 import { Alert } from '../../components/Alert';
+import { ApprovalDialog } from '../../components/ApprovalDialog';
 
 interface CartLine {
   item: MenuItem;
@@ -49,6 +51,14 @@ export function NewOrderPage() {
   const [customerAddress, setCustomerAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState(0);
+  // Promo codes and manual discounts are alternatives — a promo code wins.
+  const [promoCode, setPromoCode] = useState('');
+  // The main process decides what a discount means; the UI only displays it.
+  const [decision, setDecision] = useState<DiscountDecision | null>(null);
+  const [approvalId, setApprovalId] = useState<number | null>(null);
+  const [approvalReason, setApprovalReason] = useState('');
+  const [approvalFor, setApprovalFor] = useState(0);
+  const [isApprovalOpen, setIsApprovalOpen] = useState(false);
   const [taxPercent, setTaxPercent] = useState<number | null>(null);
   const [orderStatus, setOrderStatus] = useState<OrderStatus>('pending');
   // Payment taken at the counter. 'none' saves the order unpaid for later.
@@ -78,9 +88,53 @@ export function NewOrderPage() {
   const subtotal = cart.reduce((total, line) => total + line.item.price * line.qty, 0);
   // Mirror the main-process rule instead of clamping: the cashier sees the mistake.
   const discountTooLarge = discount > subtotal;
-  const safeDiscount = discountTooLarge ? subtotal : discount;
+  // What the main process last said about this discount. Until it answers, fall
+  // back to the raw figure so the totals do not jump while typing.
+  const safeDiscount = discountTooLarge ? subtotal : (decision?.amount ?? discount);
+  const discountBlocked = (decision?.errors.length ?? 0) > 0;
+  const needsApproval = decision?.needsApproval === true && approvalId === null;
   const tax = Math.round(((subtotal - safeDiscount) * effectiveTaxPercent) / 100);
   const total = subtotal - safeDiscount + tax;
+
+  /**
+   * Asks the main process what the current discount means for this role. Called
+   * after every edit; an approval obtained for an earlier amount is dropped,
+   * because it cannot legally cover a different figure.
+   */
+  const revalidate = async (nextDiscount: number, nextPromo: string) => {
+    setApprovalId(null);
+    setApprovalReason('');
+
+    if (nextDiscount <= 0 && nextPromo.trim() === '') {
+      setDecision(null);
+      return;
+    }
+
+    try {
+      const result = unwrap(
+        await getApi().discounts.validate({
+          subtotal,
+          percentX100: 0,
+          amount: nextDiscount,
+          promoCode: nextPromo,
+        }),
+      );
+      setDecision(result);
+    } catch {
+      // A validation failure must not block the till; the save path reports it.
+      setDecision(null);
+    }
+  };
+
+  const changeDiscount = (paisa: number) => {
+    setDiscount(paisa);
+    void revalidate(paisa, promoCode);
+  };
+
+  const changePromoCode = (code: string) => {
+    setPromoCode(code);
+    void revalidate(discount, code);
+  };
 
   const change = Math.max(tendered - total, 0);
   const tenderedTooLow = !payLater && payMethod === 'cash' && tendered > 0 && tendered < total;
@@ -137,6 +191,17 @@ export function NewOrderPage() {
       return;
     }
 
+    if (discountBlocked) {
+      setError(decision?.errors[0] ?? 'This discount is not allowed.');
+      return;
+    }
+
+    if (needsApproval) {
+      setApprovalFor(safeDiscount);
+      setIsApprovalOpen(true);
+      return;
+    }
+
     if (tenderedTooLow) {
       setError('Cash received is less than the total.');
       return;
@@ -153,7 +218,10 @@ export function NewOrderPage() {
           customerAddress,
           waiterId: waiterId ? Number(waiterId) : null,
           deliveryBoyId: deliveryBoyId ? Number(deliveryBoyId) : null,
-          discount,
+          discount: safeDiscount,
+          promoCode,
+          approvedBy: approvalId,
+          discountReason: approvalReason,
           taxPercent: effectiveTaxPercent,
           notes,
           items: cart.map((line) => ({ itemId: line.item.id, qty: line.qty, notes: '' })),
@@ -189,6 +257,19 @@ export function NewOrderPage() {
 
   return (
     <div>
+      <ApprovalDialog
+        isOpen={isApprovalOpen}
+        amount={approvalFor}
+        percentX100={subtotal > 0 ? Math.round((approvalFor / subtotal) * 10_000) : 0}
+        onClose={() => setIsApprovalOpen(false)}
+        onApproved={(id, reason) => {
+          setApprovalId(id);
+          setApprovalReason(reason);
+          setIsApprovalOpen(false);
+          toast.success('Discount approved');
+        }}
+      />
+
       <PageHeader
         title="New order"
         subtitle="Pick items, choose the order type, then save and print."
@@ -442,7 +523,7 @@ export function NewOrderPage() {
             )}
 
             <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border pt-3">
-              <MoneyInput label="Discount" value={discount} onChange={setDiscount} />
+              <MoneyInput label="Discount" value={discount} onChange={changeDiscount} />
               <Input
                 label="Tax %"
                 type="number"
@@ -454,6 +535,15 @@ export function NewOrderPage() {
                 }
               />
             </div>
+
+            <Input
+              label="Promo code"
+              value={promoCode}
+              placeholder="EID15"
+              className="mt-3"
+              onChange={(event) => changePromoCode(event.target.value.toUpperCase())}
+              hint="A promo code replaces the manual discount above."
+            />
 
             <Input
               label="Order note"
@@ -491,6 +581,36 @@ export function NewOrderPage() {
             {discountTooLarge && (
               <div className="mt-3">
                 <Alert tone="error">Discount subtotal se zyada nahi ho sakta.</Alert>
+              </div>
+            )}
+
+            {!discountTooLarge && discountBlocked && (
+              <div className="mt-3">
+                <Alert tone="error">{decision?.errors[0] ?? 'This discount is not allowed.'}</Alert>
+              </div>
+            )}
+
+            {needsApproval && (
+              <div className="mt-3 flex flex-col gap-2">
+                <Alert tone="warning">
+                  This discount needs a manager&apos;s approval before the order can be saved.
+                </Alert>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setApprovalFor(safeDiscount);
+                    setIsApprovalOpen(true);
+                  }}
+                >
+                  <ShieldCheck aria-hidden className="h-4 w-4" />
+                  Ask a manager to approve
+                </Button>
+              </div>
+            )}
+
+            {approvalId !== null && (
+              <div className="mt-3">
+                <Alert tone="success">Approved. Save the order to apply it.</Alert>
               </div>
             )}
 

@@ -41,7 +41,10 @@ export type Capability =
   | 'udhaar:settle'
   // Phase 2 (3.B) — day close / shift.
   | 'shifts:read'
-  | 'shifts:write';
+  | 'shifts:write'
+  // Phase 2 (3.C) — discount rules and manager approval.
+  | 'discount:write'
+  | 'discount:approve';
 
 export interface RolePermissions {
   role: UserRole;
@@ -160,6 +163,51 @@ export interface AddPaymentInput {
   reference: string;
 }
 
+export interface DiscountRule {
+  id: number;
+  role: UserRole;
+  maxPercentX100: number;
+  maxAmount: number | null;
+  requiresApprovalAbovePercentX100: number;
+  active: boolean;
+}
+
+export interface PromoCode {
+  id: number;
+  code: string;
+  kind: 'percent' | 'fixed';
+  value: number;
+  minOrder: number;
+  validFrom: string | null;
+  validTo: string | null;
+  maxUses: number | null;
+  uses: number;
+  active: boolean;
+}
+
+/** Result of checking a requested discount. Never clamps: it reports instead. */
+export interface DiscountDecision {
+  allowed: boolean;
+  needsApproval: boolean;
+  amount: number;
+  percentX100: number;
+  errors: string[];
+  promoCode: string;
+  /** Set only when a promo code supplied the discount, so the order can count it. */
+  promoId: number | null;
+}
+
+export interface DiscountApproval {
+  id: number;
+  orderId: number | null;
+  requestedBy: number;
+  approvedBy: number | null;
+  percentX100: number;
+  amount: number;
+  reason: string;
+  createdAt: string;
+}
+
 export type ShiftStatus = 'open' | 'closed';
 export type CashMovementKind = 'sale' | 'cash_in' | 'cash_out' | 'refund' | 'expense';
 
@@ -271,6 +319,11 @@ export interface NewOrderInput {
   waiterId: number | null;
   deliveryBoyId: number | null;
   discount: number;
+  /** Why the discount was given. Stored on the order for the audit trail. */
+  discountReason?: string;
+  promoCode?: string;
+  /** Set when a manager approved an above-limit discount. */
+  approvedBy?: number | null;
   taxPercent: number;
   notes: string;
   items: OrderItemInput[];
@@ -645,6 +698,28 @@ export interface PaymentsApi {
   }): Promise<ApiResult<CustomerLedgerEntry>>;
 }
 
+export interface DiscountsApi {
+  rules(): Promise<ApiResult<DiscountRule[]>>;
+  saveRule(input: DiscountRule): Promise<ApiResult<DiscountRule>>;
+  validate(input: {
+    subtotal: number;
+    percentX100: number;
+    amount: number;
+    promoCode: string;
+  }): Promise<ApiResult<DiscountDecision>>;
+  approve(input: {
+    orderId: number | null;
+    percentX100: number;
+    amount: number;
+    reason: string;
+    username: string;
+    password: string;
+  }): Promise<ApiResult<DiscountApproval>>;
+  listPromos(): Promise<ApiResult<PromoCode[]>>;
+  savePromo(input: Omit<PromoCode, 'id' | 'uses'> & { id?: number }): Promise<ApiResult<PromoCode>>;
+  deletePromo(id: number): Promise<ApiResult<null>>;
+}
+
 export interface ShiftsApi {
   current(): Promise<ApiResult<Shift | null>>;
   open(openingCash: number): Promise<ApiResult<Shift>>;
@@ -756,6 +831,7 @@ export interface RendererApi {
   users: UsersApi;
   payments: PaymentsApi;
   shifts: ShiftsApi;
+  discounts: DiscountsApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -798,6 +874,14 @@ export const CHANNELS = {
   shiftList: 'shift:list',
   shiftCashMovement: 'shift:cash-movement',
   shiftPrint: 'shift:print',
+
+  discountRules: 'discount:rules',
+  discountSaveRule: 'discount:save-rule',
+  discountValidate: 'discount:validate',
+  discountApprove: 'discount:approve',
+  promoList: 'promo:list',
+  promoSave: 'promo:save',
+  promoDelete: 'promo:delete',
 
   waiters: 'staff:waiters',
   waiterSave: 'staff:waiter-save',

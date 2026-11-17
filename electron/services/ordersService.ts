@@ -5,6 +5,7 @@ import type {
   OrderFilter,
   OrderStatus,
   OrderSummary,
+  UserRole,
 } from '../../src/types/api';
 import type { OrdersRepository } from '../db/repositories/ordersRepository';
 import type { CatalogRepository } from '../db/repositories/catalogRepository';
@@ -13,6 +14,8 @@ import type { SettingsRepository } from '../db/repositories/settingsRepository';
 import type { StaffRepository } from '../db/repositories/staffRepository';
 import type { UserRepository } from '../db/repositories/userRepository';
 import { percentOf } from '../utils/money';
+import { toSqlDate } from '../utils/datetime';
+import type { DiscountsService } from './discountsService';
 import { AppError } from '../utils/errors';
 import { logInfo } from './logger';
 
@@ -32,10 +35,12 @@ export function createOrdersService(deps: {
   settings: SettingsRepository;
   staff: StaffRepository;
   users: UserRepository;
+  /** Optional so the service still works in isolation; see createOrder's discount check. */
+  discounts?: DiscountsService;
 }) {
   // `users` is kept in the dependency list because invoices record the cashier name
   // through the orders query; it is available for later phases (audit fields).
-  const { orders, catalog, sequences, settings, staff } = deps;
+  const { orders, catalog, sequences, settings, staff, discounts } = deps;
 
   function findOrFail(id: number): OrderDetail {
     const order = orders.find(id);
@@ -49,7 +54,7 @@ export function createOrdersService(deps: {
      * totals are computed in integer paisa, and the order + items + invoice
      * are written in one transaction.
      */
-    create(input: NewOrderInput, createdBy: number): OrderDetail {
+    create(input: NewOrderInput, createdBy: number, role: UserRole = 'admin'): OrderDetail {
       const lines = input.items.map((line) => {
         const item = catalog.findItem(line.itemId);
         if (!item) throw new AppError('NOT_FOUND', `Item ${line.itemId} no longer exists`);
@@ -73,6 +78,63 @@ export function createOrdersService(deps: {
       if (input.discount > subtotal) {
         throw new AppError('VALIDATION_ERROR', 'Discount subtotal se zyada nahi ho sakta.');
       }
+
+      // The role's discount rule is enforced HERE, in the main process, so a
+      // cashier cannot bypass the limit by calling the channel directly.
+      let approvedBy: number | null = null;
+      let promoCode = '';
+      let promoId: number | null = null;
+
+      if (discounts && (input.discount > 0 || (input.promoCode ?? '').trim() !== '')) {
+        const decision = discounts.resolve({
+          role,
+          subtotal,
+          percentX100: 0,
+          amount: input.discount,
+          promoCode: input.promoCode ?? '',
+          today: toSqlDate(),
+        });
+
+        if (decision.errors.length > 0) {
+          throw new AppError('VALIDATION_ERROR', decision.errors[0] ?? 'Discount is not allowed');
+        }
+
+        promoCode = decision.promoCode;
+        promoId = decision.promoId;
+
+        if (decision.needsApproval) {
+          // The approval row must already exist (discount:approve) and match this
+          // cashier, otherwise the cashier could simply claim it was approved.
+          if (typeof input.approvedBy !== 'number') {
+            throw new AppError(
+              'FORBIDDEN',
+              'This discount needs a manager approval before the order can be saved',
+            );
+          }
+
+          // `input.approvedBy` is the id of the discount_approvals row the manager
+          // created moments ago — the order does not exist yet, so it cannot be
+          // looked up by order id. The approval must match this exact amount and
+          // this cashier, and must not already be spent on another order.
+          const approval = discounts.findApproval(input.approvedBy);
+
+          if (!approval) {
+            throw new AppError('FORBIDDEN', 'That discount approval does not exist');
+          }
+          if (approval.amount !== input.discount) {
+            throw new AppError('FORBIDDEN', 'That discount approval does not match this order');
+          }
+          if (approval.requestedBy !== createdBy) {
+            throw new AppError('FORBIDDEN', 'That approval was given to a different cashier');
+          }
+          if (approval.orderId !== null) {
+            throw new AppError('FORBIDDEN', 'That approval has already been used');
+          }
+
+          approvedBy = approval.approvedBy;
+        }
+      }
+
       const discount = input.discount;
       const taxable = subtotal - discount;
       const tax = percentOf(taxable, input.taxPercent);
@@ -99,7 +161,7 @@ export function createOrdersService(deps: {
         const orderNumber = sequences.next('order');
         const invoiceNumber = sequences.next('invoice');
 
-        return orders.create({
+        const newOrderId = orders.create({
           orderNo: `${orderPrefix}-${String(orderNumber).padStart(5, '0')}`,
           invoiceNo: `${invoicePrefix}-${String(invoiceNumber).padStart(5, '0')}`,
           type: input.type,
@@ -111,6 +173,9 @@ export function createOrdersService(deps: {
           deliveryBoyId: input.type === 'delivery' ? input.deliveryBoyId : null,
           subtotal,
           discount,
+          discountReason: input.discountReason ?? '',
+          promoCode,
+          approvedBy,
           taxPercent: input.taxPercent,
           tax,
           total,
@@ -118,6 +183,19 @@ export function createOrdersService(deps: {
           createdBy,
           items: lines,
         });
+
+        // Count the promo redemption in the same transaction, so a promo with a
+        // use limit cannot be oversold by two tills at once (Rules.md R3).
+        if (promoId !== null) {
+          discounts?.registerPromoUse(promoId);
+        }
+
+        // Single-use approval, inside the same transaction (Rules.md R3).
+        if (approvedBy !== null && typeof input.approvedBy === 'number') {
+          discounts?.consumeApproval(input.approvedBy, newOrderId);
+        }
+
+        return newOrderId;
       });
 
       logInfo(`Order created: ${orderId} (total ${total} paisa, ${lines.length} items)`);

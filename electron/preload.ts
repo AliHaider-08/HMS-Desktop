@@ -59,6 +59,16 @@ const api: RendererApi = {
     print: (shiftId, paper) => invoke(CHANNELS.shiftPrint, { shiftId, paper }),
   },
 
+  discounts: {
+    rules: () => invoke(CHANNELS.discountRules, {}),
+    saveRule: (input) => invoke(CHANNELS.discountSaveRule, input),
+    validate: (input) => invoke(CHANNELS.discountValidate, input),
+    approve: (input) => invoke(CHANNELS.discountApprove, input),
+    listPromos: () => invoke(CHANNELS.promoList, {}),
+    savePromo: (input) => invoke(CHANNELS.promoSave, input),
+    deletePromo: (id) => invoke(CHANNELS.promoDelete, { id }),
+  },
+
   staff: {
     listWaiters: () => invoke(CHANNELS.waiters),
     saveWaiter: (input) => invoke(CHANNELS.waiterSave, input),

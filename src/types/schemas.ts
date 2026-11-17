@@ -93,6 +93,9 @@ export const newOrderSchema = z
     waiterId: z.number().int().positive().nullable().default(null),
     deliveryBoyId: z.number().int().positive().nullable().default(null),
     discount: paisaField.default(0),
+    discountReason: optionalText(200, 'Discount reason'),
+    promoCode: optionalText(30, 'Promo code'),
+    approvedBy: z.number(message).int().positive().nullable().default(null),
     taxPercent: z.number(message).int().min(0, 'Tax cannot be negative').max(100).default(0),
     notes: optionalText(300, 'Notes'),
     items: z
@@ -398,3 +401,54 @@ export const shiftListSchema = z.object({
   limit: z.number(message).int().min(1).max(200).default(20),
 });
 export const shiftPrintSchema = z.object({ shiftId: idField, paper: z.enum(['80mm', 'a4']) });
+
+/* ------------------------------------------------------------------ *
+ * Discount rules and approvals (Phase 2, feature 3.C)
+ * ------------------------------------------------------------------ */
+
+export const discountRuleSchema = z.object({
+  id: z.number(message).int().positive(),
+  role: z.enum(['cashier', 'manager', 'admin']),
+  maxPercentX100: z.number(message).int().min(0).max(10_000),
+  maxAmount: paisaField.nullable().default(null),
+  requiresApprovalAbovePercentX100: z.number(message).int().min(0).max(10_000).default(0),
+  active: z.boolean().default(true),
+});
+
+export const discountValidateSchema = z.object({
+  subtotal: paisaField,
+  percentX100: z.number(message).int().min(0).max(10_000).default(0),
+  amount: paisaField.default(0),
+  promoCode: optionalText(30, 'Promo code'),
+});
+
+export const discountApproveSchema = z.object({
+  orderId: idField.nullable().default(null),
+  percentX100: z.number(message).int().min(0).max(10_000).default(0),
+  amount: paisaField,
+  reason: z.string(message).trim().min(3, 'Give a reason for this discount').max(200),
+  username: z.string(message).trim().min(1, 'Manager username is required'),
+  password: z.string(message).min(1, 'Manager password is required'),
+});
+
+export const promoSchema = z
+  .object({
+    id: z.number(message).int().positive().optional(),
+    code: z
+      .string(message)
+      .trim()
+      .min(2, 'The code needs at least 2 characters')
+      .max(20, 'The code is too long')
+      .regex(/^[A-Za-z0-9_-]+$/, 'Use letters and numbers only'),
+    kind: z.enum(['percent', 'fixed']),
+    value: z.number(message).int().min(1, 'The value must be more than zero'),
+    minOrder: paisaField.default(0),
+    validFrom: z.string(message).trim().nullable().default(null),
+    validTo: z.string(message).trim().nullable().default(null),
+    maxUses: z.number(message).int().positive().nullable().default(null),
+    active: z.boolean().default(true),
+  })
+  .refine((values) => values.kind !== 'percent' || values.value <= 10_000, {
+    message: 'A promo percentage cannot exceed 100%',
+    path: ['value'],
+  });

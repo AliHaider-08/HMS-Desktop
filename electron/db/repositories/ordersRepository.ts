@@ -107,11 +107,13 @@ export function createOrdersRepository(db: AppDatabase) {
     INSERT INTO orders (
       order_no, type, customer_id, customer_name, customer_phone, customer_address,
       waiter_id, delivery_boy_id, status, subtotal, discount, tax_percent, tax, total,
-      notes, created_by, created_at, updated_at
+      notes, created_by, created_at, updated_at,
+      discount_reason, promo_code, approved_by
     ) VALUES (
       @orderNo, @type, @customerId, @customerName, @customerPhone, @customerAddress,
       @waiterId, @deliveryBoyId, @status, @subtotal, @discount, @taxPercent, @tax, @total,
-      @notes, @createdBy, @now, @now
+      @notes, @createdBy, @now, @now,
+      @discountReason, @promoCode, @approvedBy
     )
   `);
   const insertOrderItem = db.prepare(`
@@ -191,6 +193,9 @@ export function createOrdersRepository(db: AppDatabase) {
       deliveryBoyId: number | null;
       subtotal: number;
       discount: number;
+      discountReason: string;
+      promoCode: string;
+      approvedBy: number | null;
       taxPercent: number;
       tax: number;
       total: number;
@@ -220,6 +225,10 @@ export function createOrdersRepository(db: AppDatabase) {
         }
 
         const result = insertOrder.run({
+          // Discount audit fields (migration 010). Always present, even when empty.
+          discountReason: payload.discountReason ?? '',
+          promoCode: payload.promoCode ?? '',
+          approvedBy: payload.approvedBy ?? null,
           orderNo: payload.orderNo,
           type: payload.type,
           customerId,

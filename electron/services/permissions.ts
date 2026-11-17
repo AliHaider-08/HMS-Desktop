@@ -42,6 +42,8 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'udhaar:settle',
     'shifts:read',
     'shifts:write',
+    'discount:write',
+    'discount:approve',
   ],
   manager: [
     'orders:write',
@@ -56,10 +58,21 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'udhaar:settle',
     'shifts:read',
     'shifts:write',
+    'discount:write',
+    'discount:approve',
   ],
   // A cashier takes payments and may look at udhaar, but cannot void money or settle
   // a customer account — that is a manager decision.
-  cashier: ['orders:write', 'payments:write', 'udhaar:read', 'shifts:read', 'shifts:write'],
+  // A cashier may give a small discount (`discount:write`) but cannot approve an
+  // above-limit one — that needs a manager's own password.
+  cashier: [
+    'orders:write',
+    'payments:write',
+    'udhaar:read',
+    'shifts:read',
+    'shifts:write',
+    'discount:write',
+  ],
 };
 
 export function getRolePermissions(role: UserRole): RolePermissions {

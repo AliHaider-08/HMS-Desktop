@@ -16,7 +16,7 @@ export function ordersHandlers(orders: OrdersService, print: PrintService): Hand
       capability: 'orders:write',
       schema: newOrderSchema,
       handler: (input: NewOrderInput, context: HandlerContext) =>
-        orders.create(input, context.user.id),
+        orders.create(input, context.user.id, context.user.role),
     },
 
     [CHANNELS.orderList]: {

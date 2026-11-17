@@ -49,6 +49,7 @@ export function createHarness({ withDemoData = true } = {}) {
     sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
     payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
     shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
+    discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -66,6 +67,11 @@ export function createHarness({ withDemoData = true } = {}) {
   const { seedDemoData } = load('db/seedDemo.js');
 
   const auth = createAuthService(repositories.users);
+
+  const discountsService = load('services/discountsService.js').createDiscountsService({
+    discounts: repositories.discounts,
+    users: repositories.users,
+  });
 
   const staffService = createStaffService({
     staff: repositories.staff,
@@ -131,6 +137,7 @@ export function createHarness({ withDemoData = true } = {}) {
       settings: repositories.settings,
       staff: repositories.staff,
       users: repositories.users,
+      discounts: discountsService,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: repositories.vehicles, staff: repositories.staff }),
@@ -148,6 +155,7 @@ export function createHarness({ withDemoData = true } = {}) {
       shifts: repositories.shifts,
       orders: repositories.orders,
     }),
+    discounts: discountsService,
   });
 
   /** Calls a channel exactly like the Electron main process does. */
