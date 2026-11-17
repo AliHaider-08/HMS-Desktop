@@ -111,8 +111,8 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 - Phase 1 (release blockers): **done**, PR open, CI green, no migration used.
 - Phase 2: **done** — payments/udhaar (008), shifts + X/Z report (009), discount rules (010),
   kitchen tickets + tokens (011).
-- Phase 3 (tables/merge/split, order amendments, hardening: logo out of settings, silent print,
-  sandbox, persistent lockout, keyset pagination): not started.
+- Phase 3: tables/merge/split (012) **done**. Remaining: order amendments, then hardening
+  (logo out of settings, silent print, sandbox, persistent lockout, keyset pagination).
 - Phase 4 (variants/combos, inventory/recipes, Urdu UI): not started.
 
 ## Known Issues / Bugs
@@ -125,8 +125,7 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 - Expense/salary history is per month; no multi-year archive screen (data is still stored).
 - Restoring a backup **relaunches the app**; this is intentional (repositories cannot be swapped
   safely). The relaunch itself is not unit-tested — it needs a live Electron app.
-- Phase 3–4 features are not in this build yet (tables/merge/split, amendments, hardening,
-  variants/combos, inventory, Urdu).
+- Phase 3–4 features still missing: order amendments, hardening, variants/combos, inventory, Urdu.
 - ~~Log rotation is not implemented~~ — **fixed**: `app.log` rotates to `app.log.1` at 5 MB and only
   one old file is kept (`electron/services/logger.ts`, covered by a Phase 6 test).
 
@@ -183,6 +182,30 @@ Editing rules is admin-only (`roles: ['admin']`); promo codes need `discount:wri
 - The till prints the slip right after saving. A print failure is reported but never blocks the
   order — it is already saved and paid, and the invoice screen can reprint.
 
+## Tables, merge and split (migration 012)
+The invariant: **money never moves between orders.** Everything else follows from it.
+
+- Merging is allowed only while **nothing has been paid** on either bill. A bill with any payment is
+  refused with "void the payment first". Re-parenting a payment would make the day-close cash
+  report a lie, and there is no reconciliation screen that could put it back.
+- After a merge the **source keeps its totals** and is marked `merged_into_order_id` with status
+  `delivered`. Its number still leads to the right order, and the day's takings still add up to
+  exactly what they did before. Its table is freed.
+- A split moves `order_item` rows to a **brand-new order** with its own ORD-/INV- numbers from the
+  same sequences, sets `split_from_order_id`, and can seat the new bill at a free table. At least
+  one line must stay behind — moving every line is what merge is for.
+- Both operations recalculate totals **from the lines, inside one transaction**. The discount is
+  re-derived from the percentage it represented and capped at the new subtotal, rather than
+  carried across as a fixed amount that no longer relates to anything.
+- A table holds **one open bill**. Enforced in `ordersService.create()` (so a second till cannot
+  seat two bills at T4 by calling the channel) and again in the repository.
+- A `tableId` sent with a takeaway order is **ignored, not silently seated**.
+- A table with an open bill cannot be deleted.
+
+Permissions: **merge/split are gated on `orders:write`** — it is till work done with the customer
+present. `tables:write` is the floor plan itself (names, seats, removal) and is manager/admin only.
+A careless `.replace()` once gave cashiers `tables:write`; the phase-12 test now pins the boundary.
+
 ## Last Updated
 - Date: 2026-11-16
-- By: Arena Agent (Phase 2 — 3.D kitchen tickets, Phase 2 complete)
+- By: Arena Agent (Phase 3 — tables, merge and split)
