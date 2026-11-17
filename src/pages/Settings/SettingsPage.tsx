@@ -19,13 +19,17 @@ import { PageHeader } from '../../components/PageHeader';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { toast } from '../../components/Toast';
 import { Alert } from '../../components/Alert';
+import { DiscountsCard } from './DiscountsCard';
 
 /** Form values keep the defaulted fields optional; the schema fills them in. */
 type SettingsFormValues = z.input<typeof shopSettingsSchema>;
 
 export function SettingsPage() {
-  const { can } = useAuth();
+  const { can, capabilities } = useAuth();
   const canWrite = can('settings');
+  // The settings page is admin-only, but the discount controls also check the
+  // capability so a future manager-level settings page cannot expose them.
+  const canApprove = capabilities.includes('discount:approve');
   const settings = useSettingsStore((state) => state.settings);
   const saveSettings = useSettingsStore((state) => state.save);
 
@@ -261,6 +265,12 @@ export function SettingsPage() {
           </Card>
         </div>
       </div>
+
+      {canApprove && (
+        <div className="mt-4">
+          <DiscountsCard canWrite={canWrite} />
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={restoreTarget !== null}

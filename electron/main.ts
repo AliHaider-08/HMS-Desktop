@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import { copyFileSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { closeDatabase, getDatabase, openDatabase } from './db/connection';
 import { runMigrations } from './db/migrate';
 import { createUserRepository } from './db/repositories/userRepository';
@@ -10,6 +10,9 @@ import { createOrdersRepository } from './db/repositories/ordersRepository';
 import { createStaffRepository } from './db/repositories/staffRepository';
 import { createVehiclesRepository } from './db/repositories/vehiclesRepository';
 import { createSequenceRepository } from './db/repositories/sequenceRepository';
+import { createPaymentsRepository } from './db/repositories/paymentsRepository';
+import { createShiftsRepository } from './db/repositories/shiftsRepository';
+import { createDiscountsRepository } from './db/repositories/discountsRepository';
 import { seedDefaultAdmin } from './db/seed';
 import { seedDemoData } from './db/seedDemo';
 import { createAuthService } from './services/authService';
@@ -21,10 +24,18 @@ import { createStaffService } from './services/staffService';
 import { createVehiclesService } from './services/vehiclesService';
 import { createReportsService } from './services/reportsService';
 import { createCsvService } from './services/csvService';
+import { createPaymentsService } from './services/paymentsService';
+import { createShiftsService } from './services/shiftsService';
+import { createDiscountsService } from './services/discountsService';
+import { createKotService } from './services/kotService';
+import { createKotRepository } from './db/repositories/kotRepository';
+import { createTablesRepository } from './db/repositories/tablesRepository';
+import { createTablesService } from './services/tablesService';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
 import { configureLogger, logError, logInfo } from './services/logger';
+import { monthEnd, monthStart } from './utils/datetime';
 import type { AuthService } from './services/authService';
 
 const isDev = !app.isPackaged;
@@ -44,6 +55,15 @@ function migrationsDirectory(): string {
   // Copied next to the compiled JS by scripts/copy-electron-assets.mjs,
   // so the same relative path works in dev, in the asar build and in tests.
   return path.join(__dirname, 'db', 'migrations');
+}
+
+/** Highest migration number shipped with this build — a backup from a newer one is refused. */
+function supportedSchemaVersion(): number {
+  const directory = migrationsDirectory();
+  return readdirSync(directory)
+    .filter((file) => /^\d{3,}_.+\.sql$/.test(file))
+    .map((file) => Number(file.slice(0, file.indexOf('_'))))
+    .reduce((highest, version) => Math.max(highest, version), 0);
 }
 
 function backupDirectory(): string {
@@ -79,6 +99,11 @@ async function bootstrapServices(): Promise<void> {
   const staffRepo = createStaffRepository(db);
   const vehiclesRepo = createVehiclesRepository(db);
   const sequences = createSequenceRepository(db);
+  const paymentsRepo = createPaymentsRepository(db);
+  const shiftsRepo = createShiftsRepository(db);
+  const discountsRepo = createDiscountsRepository(db);
+  const kotRepo = createKotRepository(db);
+  const tablesRepo = createTablesRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -93,14 +118,17 @@ async function bootstrapServices(): Promise<void> {
   }
 
   const auth = createAuthService(users);
+
+  // Created before the order service because orders.create() enforces its rule.
+  const discountsService = createDiscountsService({ discounts: discountsRepo, users });
   authService = auth;
 
   const staffService = createStaffService({
     staff: staffRepo,
     vehicles: vehiclesRepo,
     commissionForMonth: (deliveryBoyId, month) => {
-      const from = `${month}-01`;
-      const to = `${month}-31`;
+      const from = monthStart(month);
+      const to = monthEnd(month);
       return (
         ordersRepo.deliveriesByBoy(from, to).find((row) => row.deliveryBoyId === deliveryBoyId)
           ?.commission ?? 0
@@ -108,24 +136,58 @@ async function bootstrapServices(): Promise<void> {
     },
   });
 
-  const backups = createBackupService(databaseFile(), backupDirectory(), {
-    checkpoint: () => {
-      getDatabase().pragma('wal_checkpoint(TRUNCATE)');
-    },
-    replaceWith: (sourcePath) => {
-      closeDatabase();
-      copyFileSync(sourcePath, databaseFile());
-      // Drop stale WAL/SHM files from the previous database before reopening.
-      for (const suffix of ['-wal', '-shm']) {
+  const backups = createBackupService(
+    databaseFile(),
+    backupDirectory(),
+    {
+      checkpoint: () => {
+        getDatabase().pragma('wal_checkpoint(TRUNCATE)');
+      },
+      /**
+       * A restore swaps the whole database file, so every repository built during
+       * bootstrap would still point at the old, closed handle. Rather than trying to
+       * hot-swap them (fragile), we copy the file and relaunch the app. The candidate
+       * file was already validated by backupService.restore(), so the copy is safe.
+       */
+      replaceWith: (sourcePath) => {
+        closeDatabase();
+
         try {
-          unlinkSync(`${databaseFile()}${suffix}`);
-        } catch {
-          // The file may not exist; that is fine.
+          copyFileSync(sourcePath, databaseFile());
+          // Stale WAL/SHM pages from the replaced database would corrupt the new one.
+          for (const suffix of ['-wal', '-shm']) {
+            try {
+              unlinkSync(`${databaseFile()}${suffix}`);
+            } catch {
+              // The sidecar may not exist; that is fine.
+            }
+          }
+        } catch (error) {
+          logError('Restore copy failed', error);
+          dialog.showErrorBox(
+            'Restore failed',
+            'The backup could not be copied. Your current data is unchanged. Please close the app and try again.',
+          );
+          openDatabase(databaseFile());
+          return;
         }
-      }
-      openDatabase(databaseFile());
+
+        dialog.showMessageBoxSync({
+          type: 'info',
+          title: 'Restore complete',
+          message: 'The backup has been restored.',
+          detail: 'The app will now restart so the restored data can be loaded.',
+          buttons: ['Restart now'],
+        });
+
+        app.relaunch();
+        app.exit(0);
+      },
     },
-  });
+    {
+      supportedSchemaVersion: supportedSchemaVersion(),
+    },
+  );
 
   backupServiceInstance = backups;
 
@@ -161,6 +223,12 @@ async function bootstrapServices(): Promise<void> {
       settings: settingsRepo,
       staff: staffRepo,
       users,
+      // The discount rule is enforced inside create(), so it must be wired in.
+      discounts: discountsService,
+      // Allocates the customer token inside the order transaction.
+      kot: kotRepo,
+      // Seats a dine-in order and enforces one open bill per table.
+      tables: tablesRepo,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: vehiclesRepo, staff: staffRepo }),
@@ -170,6 +238,17 @@ async function bootstrapServices(): Promise<void> {
     backups,
     print: printService,
     csv: csvService,
+    payments: createPaymentsService({ payments: paymentsRepo, orders: ordersRepo }),
+    shifts: createShiftsService({ shifts: shiftsRepo, orders: ordersRepo }),
+    discounts: discountsService,
+    kot: createKotService({ kot: kotRepo, print: printService, settings: settingsRepo }),
+    tables: createTablesService({
+      tables: tablesRepo,
+      orders: ordersRepo,
+      payments: paymentsRepo,
+      sequences,
+      settings: settingsRepo,
+    }),
   });
 }
 

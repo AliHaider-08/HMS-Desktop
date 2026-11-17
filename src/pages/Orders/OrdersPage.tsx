@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, Filter, Plus, RefreshCw, Search, XCircle } from 'lucide-react';
 import type { OrderFilter, OrderStatus, OrderSummary, OrderType } from '../../types/api';
-import { ORDER_STATUS_CLASSES, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../../types/labels';
+import {
+  ORDER_STATUS_CLASSES,
+  ORDER_STATUS_LABELS,
+  ORDER_TYPE_LABELS,
+  PAYMENT_STATUS_CLASSES,
+  PAYMENT_STATUS_LABELS,
+} from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
 import { useAuth } from '../../hooks/useAuth';
@@ -64,7 +70,25 @@ export function OrdersPage() {
       header: 'Order',
       render: (row) => (
         <div>
-          <p className="font-medium">{row.orderNo}</p>
+          <p className="flex items-center gap-2 font-medium">
+            {row.orderNo}
+            {row.amendmentCount > 0 && (
+              <span
+                className="rounded-control bg-status-pending/10 px-1.5 py-0.5 text-[11px] font-semibold text-status-pending"
+                title={`Edited ${row.amendmentCount} time(s)`}
+              >
+                edited
+              </span>
+            )}
+            {row.tokenNo !== null && (
+              <span
+                className="rounded-control bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary"
+                title="Token called out to the customer"
+              >
+                #{row.tokenNo}
+              </span>
+            )}
+          </p>
           <p className="text-caption text-text-secondary">{row.invoiceNo ?? '—'}</p>
         </div>
       ),
@@ -103,9 +127,18 @@ export function OrdersPage() {
       header: 'Total',
       align: 'right',
       render: (row) => (
-        <span className="font-medium">
-          {currency} {formatAmount(row.total)}
-        </span>
+        <div>
+          <p className="font-medium">
+            {currency} {formatAmount(row.total)}
+          </p>
+          <span
+            className={`mt-0.5 inline-flex rounded-full px-1.5 text-[11px] ${
+              PAYMENT_STATUS_CLASSES[row.paymentStatus]
+            }`}
+          >
+            {PAYMENT_STATUS_LABELS[row.paymentStatus]}
+          </span>
+        </div>
       ),
     },
     {
