@@ -40,6 +40,15 @@ const api: RendererApi = {
     savePdf: (id, paper) => invoke(CHANNELS.orderPdf, { id, paper }),
   },
 
+  payments: {
+    addPayment: (input) => invoke(CHANNELS.paymentAdd, input),
+    voidPayment: (id, reason) => invoke(CHANNELS.paymentVoid, { id, reason }),
+    listByOrder: (orderId) => invoke(CHANNELS.paymentListByOrder, { orderId }),
+    udhaarList: () => invoke(CHANNELS.udhaarList, {}),
+    udhaarLedger: (customerId) => invoke(CHANNELS.udhaarLedger, { customerId }),
+    settleUdhaar: (input) => invoke(CHANNELS.udhaarSettle, input),
+  },
+
   staff: {
     listWaiters: () => invoke(CHANNELS.waiters),
     saveWaiter: (input) => invoke(CHANNELS.waiterSave, input),

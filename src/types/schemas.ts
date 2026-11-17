@@ -303,3 +303,74 @@ export type ChangePasswordPayload = z.infer<typeof changePasswordSchema>;
 export function firstIssueMessage(error: z.ZodError): string {
   return error.issues[0]?.message ?? 'The submitted data is not valid';
 }
+
+/* ------------------------------------------------------------------ *
+ * Payments (Phase 2, feature 3.A)
+ * ------------------------------------------------------------------ */
+
+export const paymentMethodSchema = z.enum([
+  'cash',
+  'card',
+  'jazzcash',
+  'easypaisa',
+  'bank_transfer',
+  'credit',
+]);
+
+/**
+ * Cash is the only method that takes more money than owed (and gives change), so
+ * `tendered`/`changeDue` are validated against the amount and rejected elsewhere.
+ */
+export const paymentSchema = z
+  .object({
+    orderId: idField,
+    method: paymentMethodSchema,
+    amount: paisaField.refine((value) => value > 0, {
+      message: 'Payment must be more than zero',
+    }),
+    tendered: paisaField.nullable().default(null),
+    changeDue: paisaField.nullable().default(null),
+    reference: optionalText(80, 'Reference'),
+  })
+  .refine((values) => values.method === 'cash' || values.tendered === null, {
+    message: 'Only a cash payment can record cash tendered',
+    path: ['tendered'],
+  })
+  .refine((values) => values.method === 'cash' || values.changeDue === null, {
+    message: 'Only a cash payment can give change',
+    path: ['changeDue'],
+  })
+  .refine((values) => values.tendered === null || values.tendered >= values.amount, {
+    message: 'Cash tendered cannot be less than the amount',
+    path: ['tendered'],
+  })
+  .refine(
+    (values) =>
+      values.tendered === null ||
+      values.changeDue === null ||
+      values.changeDue === values.tendered - values.amount,
+    {
+      message: 'Change must equal the cash tendered minus the amount',
+      path: ['changeDue'],
+    },
+  );
+
+export const paymentVoidSchema = z.object({
+  id: idField,
+  reason: z.string(message).trim().min(3, 'Give a reason for voiding this payment').max(200),
+});
+
+export const udhaarSettleSchema = z.object({
+  customerId: idField,
+  method: paymentMethodSchema.refine((method) => method !== 'credit', {
+    message: 'Choose how the customer paid',
+  }),
+  amount: paisaField.refine((value) => value > 0, { message: 'Amount must be more than zero' }),
+  reference: optionalText(80, 'Reference'),
+  orderId: idField.nullable().default(null),
+});
+
+export const ledgerQuerySchema = z.object({ customerId: idField });
+
+/** CSV export names that map to the udhaar page. */
+export const UDHAAR_EXPORT = 'udhaar' as const;

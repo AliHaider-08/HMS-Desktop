@@ -5,7 +5,7 @@
  * It uses a throw-away database in the OS temp folder, never the shop data.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -56,8 +56,11 @@ async function main() {
   const db = openDatabase(dbFile);
 
   await check('first run applies every migration', () => {
-    // 001..007 must all run on a fresh database.
-    assert.equal(runMigrations(db, migrationsDir), 7);
+    // Count the files instead of hardcoding a number, so adding a migration never
+    // breaks this test.
+    const expected = readdirSync(migrationsDir).filter((file) => file.endsWith('.sql')).length;
+    assert.ok(expected > 0, 'the migrations directory should not be empty');
+    assert.equal(runMigrations(db, migrationsDir), expected);
   });
 
   await check('second run applies nothing (migrations are idempotent)', () => {
@@ -226,7 +229,7 @@ async function main() {
   });
 
   await check('role page permissions come from the main process map', () => {
-    assert.deepEqual(getRolePermissions('cashier').pages, ['home', 'orders', 'menu']);
+    assert.deepEqual(getRolePermissions('cashier').pages, ['home', 'orders', 'menu', 'udhaar']);
     assert.deepEqual(getRolePermissions('manager').pages, [
       'home',
       'orders',
@@ -234,6 +237,7 @@ async function main() {
       'staff',
       'vehicles',
       'reports',
+      'udhaar',
     ]);
     assert.deepEqual(getRolePermissions('admin').pages, [
       'home',
@@ -244,6 +248,7 @@ async function main() {
       'reports',
       'users',
       'settings',
+      'udhaar',
     ]);
     assert.equal(roleHasPage('cashier', 'settings'), false);
     assert.equal(roleHasPage('cashier', 'staff'), false);

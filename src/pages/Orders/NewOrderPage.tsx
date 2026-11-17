@@ -1,8 +1,15 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Minus, Plus, Search, ShoppingBag, Trash2, X } from 'lucide-react';
-import type { DeliveryBoy, MenuItem, OrderStatus, OrderType, Waiter } from '../../types/api';
-import { ORDER_TYPE_LABELS } from '../../types/labels';
+import type {
+  DeliveryBoy,
+  MenuItem,
+  OrderStatus,
+  OrderType,
+  PaymentMethod,
+  Waiter,
+} from '../../types/api';
+import { ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
 import { useSettings } from '../../store/settingsStore';
@@ -44,6 +51,10 @@ export function NewOrderPage() {
   const [discount, setDiscount] = useState(0);
   const [taxPercent, setTaxPercent] = useState<number | null>(null);
   const [orderStatus, setOrderStatus] = useState<OrderStatus>('pending');
+  // Payment taken at the counter. 'none' saves the order unpaid for later.
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('cash');
+  const [payLater, setPayLater] = useState(false);
+  const [tendered, setTendered] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,9 +76,14 @@ export function NewOrderPage() {
   }, [items.data, categoryId, search]);
 
   const subtotal = cart.reduce((total, line) => total + line.item.price * line.qty, 0);
-  const safeDiscount = Math.min(discount, subtotal);
+  // Mirror the main-process rule instead of clamping: the cashier sees the mistake.
+  const discountTooLarge = discount > subtotal;
+  const safeDiscount = discountTooLarge ? subtotal : discount;
   const tax = Math.round(((subtotal - safeDiscount) * effectiveTaxPercent) / 100);
   const total = subtotal - safeDiscount + tax;
+
+  const change = Math.max(tendered - total, 0);
+  const tenderedTooLow = !payLater && payMethod === 'cash' && tendered > 0 && tendered < total;
 
   const addItem = (item: MenuItem) => {
     if (!item.available) {
@@ -116,6 +132,16 @@ export function NewOrderPage() {
       return;
     }
 
+    if (discountTooLarge) {
+      setError('Discount subtotal se zyada nahi ho sakta.');
+      return;
+    }
+
+    if (tenderedTooLow) {
+      setError('Cash received is less than the total.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const created = unwrap(
@@ -133,6 +159,25 @@ export function NewOrderPage() {
           items: cart.map((line) => ({ itemId: line.item.id, qty: line.qty, notes: '' })),
         }),
       );
+
+      // Take the money only after the order exists. A failed payment must not lose
+      // the order, so it is reported separately and the invoice screen can retry.
+      if (!payLater) {
+        try {
+          unwrap(
+            await getApi().payments.addPayment({
+              orderId: created.id,
+              method: payMethod,
+              amount: payMethod === 'credit' ? total : total,
+              tendered: payMethod === 'cash' ? tendered || total : null,
+              changeDue: payMethod === 'cash' ? Math.max((tendered || total) - total, 0) : null,
+              reference: '',
+            }),
+          );
+        } catch (paymentError) {
+          toast.error(errorMessage(paymentError, 'The payment could not be recorded'));
+        }
+      }
 
       toast.success(`Order ${created.orderNo} saved`);
       navigate(`/invoice/${created.id}`, { state: { autoPrint: thenPrint } });
@@ -442,6 +487,72 @@ export function NewOrderPage() {
                 </dd>
               </div>
             </dl>
+
+            {discountTooLarge && (
+              <div className="mt-3">
+                <Alert tone="error">Discount subtotal se zyada nahi ho sakta.</Alert>
+              </div>
+            )}
+
+            {/* -------------------------- Payment -------------------------- */}
+            <div className="mt-4 rounded-control border border-border bg-background/60 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-button">Payment</span>
+                <label className="flex items-center gap-2 text-caption text-text-secondary">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={payLater}
+                    onChange={(event) => setPayLater(event.target.checked)}
+                  />
+                  Pay later (unpaid)
+                </label>
+              </div>
+
+              {!payLater && (
+                <>
+                  <Select
+                    label="Method"
+                    value={payMethod}
+                    onChange={(event) => {
+                      setPayMethod(event.target.value as PaymentMethod);
+                      setTendered(0);
+                    }}
+                    options={(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map(
+                      (value) => ({ value, label: PAYMENT_METHOD_LABELS[value] }),
+                    )}
+                  />
+
+                  {payMethod === 'cash' && (
+                    <div className="mt-2">
+                      <MoneyInput
+                        label="Cash received"
+                        value={tendered}
+                        onChange={setTendered}
+                        hint="Leave at 0 to take the exact total"
+                      />
+                      {change > 0 && (
+                        <p className="mt-1 text-caption text-text-secondary">
+                          Change due: <span className="font-medium">{formatAmount(change)}</span>
+                        </p>
+                      )}
+                      {tenderedTooLow && (
+                        <p className="mt-1 text-caption text-status-cancelled">
+                          Cash received is less than the total.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {payMethod === 'credit' && (
+                    <p className="mt-2 text-caption text-text-secondary">
+                      The full amount will be added to this customer&apos;s udhaar. A phone number
+                      is required.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
 
             {error && (
               <div className="mt-3">

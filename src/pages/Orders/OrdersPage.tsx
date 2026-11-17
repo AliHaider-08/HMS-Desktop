@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, Filter, Plus, RefreshCw, Search, XCircle } from 'lucide-react';
 import type { OrderFilter, OrderStatus, OrderSummary, OrderType } from '../../types/api';
-import { ORDER_STATUS_CLASSES, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../../types/labels';
+import {
+  ORDER_STATUS_CLASSES,
+  ORDER_STATUS_LABELS,
+  ORDER_TYPE_LABELS,
+  PAYMENT_STATUS_CLASSES,
+  PAYMENT_STATUS_LABELS,
+} from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
 import { useAuth } from '../../hooks/useAuth';
@@ -103,9 +109,18 @@ export function OrdersPage() {
       header: 'Total',
       align: 'right',
       render: (row) => (
-        <span className="font-medium">
-          {currency} {formatAmount(row.total)}
-        </span>
+        <div>
+          <p className="font-medium">
+            {currency} {formatAmount(row.total)}
+          </p>
+          <span
+            className={`mt-0.5 inline-flex rounded-full px-1.5 text-[11px] ${
+              PAYMENT_STATUS_CLASSES[row.paymentStatus]
+            }`}
+          >
+            {PAYMENT_STATUS_LABELS[row.paymentStatus]}
+          </span>
+        </div>
       ),
     },
     {

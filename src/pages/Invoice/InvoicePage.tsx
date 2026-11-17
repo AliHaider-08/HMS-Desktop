@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, FileDown, Printer } from 'lucide-react';
-import type { InvoiceData, OrderStatus } from '../../types/api';
-import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../../types/labels';
+import type { InvoiceData, OrderStatus, Payment, PaymentMethod } from '../../types/api';
+import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
 import { useAuth } from '../../hooks/useAuth';
@@ -12,6 +12,10 @@ import { Card } from '../../components/Card';
 import { PageHeader } from '../../components/PageHeader';
 import { Select } from '../../components/Select';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { Modal } from '../../components/Modal';
+import { Input } from '../../components/Input';
+import { MoneyInput } from '../../components/MoneyInput';
+import { Alert } from '../../components/Alert';
 import { toast } from '../../components/Toast';
 
 const STATUS_OPTIONS: OrderStatus[] = ['pending', 'preparing', 'ready', 'delivered'];
@@ -35,12 +39,35 @@ export function InvoicePage() {
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [askPrint, setAskPrint] = useState(false);
 
+  // Payments for this order (feature 3.A).
+  const [paymentOpen, setPaymentOpen] = useState(false);
+  const [voidTarget, setVoidTarget] = useState<Payment | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('cash');
+  const [payAmount, setPayAmount] = useState(0);
+  const [payTendered, setPayTendered] = useState(0);
+  const [payReference, setPayReference] = useState('');
+  const [payError, setPayError] = useState<string | null>(null);
+  const [isPaying, setIsPaying] = useState(false);
+
   const invoice = useAsync(async () => {
     if (!Number.isFinite(orderId)) throw new Error('Invalid order');
     return unwrap(await getApi().orders.invoice(orderId));
   }, [orderId]);
 
   const data: InvoiceData | null = invoice.data;
+
+  const payments = useAsync(
+    async () =>
+      Number.isFinite(orderId) ? unwrap(await getApi().payments.listByOrder(orderId)) : [],
+    [orderId],
+  );
+
+  const canVoid = allow('payments:void');
+  const paidTotal = (payments.data ?? [])
+    .filter((payment) => !payment.voidedAt)
+    .reduce((sum, payment) => sum + payment.amount, 0);
+  const outstanding = Math.max((data?.order.total ?? 0) - paidTotal, 0);
 
   const totals = useMemo(() => {
     if (!data) return null;
@@ -121,6 +148,59 @@ export function InvoicePage() {
       </div>
     );
   }
+
+  const openPayment = () => {
+    setPayMethod('cash');
+    setPayAmount(outstanding);
+    setPayTendered(0);
+    setPayReference('');
+    setPayError(null);
+    setPaymentOpen(true);
+  };
+
+  const submitPayment = async () => {
+    setIsPaying(true);
+    setPayError(null);
+    try {
+      unwrap(
+        await getApi().payments.addPayment({
+          orderId,
+          method: payMethod,
+          amount: payAmount,
+          tendered: payMethod === 'cash' ? payTendered || payAmount : null,
+          changeDue:
+            payMethod === 'cash' ? Math.max((payTendered || payAmount) - payAmount, 0) : null,
+          reference: payReference,
+        }),
+      );
+      toast.success('Payment recorded');
+      setPaymentOpen(false);
+      await payments.reload();
+      await invoice.reload();
+    } catch (error) {
+      setPayError(errorMessage(error, 'The payment could not be recorded'));
+    } finally {
+      setIsPaying(false);
+    }
+  };
+
+  const submitVoid = async () => {
+    if (!voidTarget) return;
+    setIsPaying(true);
+    setPayError(null);
+    try {
+      unwrap(await getApi().payments.voidPayment(voidTarget.id, voidReason));
+      toast.success('Payment voided');
+      setVoidTarget(null);
+      setVoidReason('');
+      await payments.reload();
+      await invoice.reload();
+    } catch (error) {
+      setPayError(errorMessage(error, 'The payment could not be voided'));
+    } finally {
+      setIsPaying(false);
+    }
+  };
 
   return (
     <div>
@@ -265,6 +345,74 @@ export function InvoicePage() {
 
         {/* ------------------------------ Actions ------------------------------ */}
         <div className="flex flex-col gap-4">
+          {/* ----------------------------- Payments ----------------------------- */}
+          <Card>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-card-title">Payment</h2>
+              {outstanding === 0 ? (
+                <span className="rounded-full bg-status-delivered/10 px-2 py-0.5 text-caption text-status-delivered">
+                  Paid
+                </span>
+              ) : (
+                <span className="rounded-full bg-status-cancelled/10 px-2 py-0.5 text-caption text-status-cancelled">
+                  {paidTotal > 0 ? 'Part paid' : 'Unpaid'}
+                </span>
+              )}
+            </div>
+
+            <dl className="mb-3 flex flex-col gap-1 text-body">
+              <div className="flex justify-between">
+                <dt className="text-text-secondary">Order total</dt>
+                <dd className="tabular">{formatAmount(data?.order.total ?? 0)}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-text-secondary">Paid so far</dt>
+                <dd className="tabular">{formatAmount(paidTotal)}</dd>
+              </div>
+              <div className="flex justify-between border-t border-border pt-1">
+                <dt className="font-medium">Outstanding</dt>
+                <dd className="font-medium tabular">{formatAmount(outstanding)}</dd>
+              </div>
+            </dl>
+
+            {(payments.data ?? []).length > 0 && (
+              <ul className="mb-3 flex flex-col gap-1">
+                {(payments.data ?? []).map((payment) => (
+                  <li
+                    key={payment.id}
+                    className="flex items-center justify-between rounded-control bg-background px-2 py-1 text-caption"
+                  >
+                    <span className={payment.voidedAt ? 'line-through text-text-secondary' : ''}>
+                      {PAYMENT_METHOD_LABELS[payment.method]} · {formatAmount(payment.amount)}
+                      {payment.reference ? ` · ${payment.reference}` : ''}
+                    </span>
+                    {payment.voidedAt ? (
+                      <span className="text-status-cancelled">voided</span>
+                    ) : canVoid ? (
+                      <button
+                        type="button"
+                        className="text-status-cancelled underline"
+                        onClick={() => {
+                          setVoidTarget(payment);
+                          setVoidReason('');
+                          setPayError(null);
+                        }}
+                      >
+                        Void
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {outstanding > 0 && (
+              <Button variant="secondary" fullWidth onClick={openPayment}>
+                Add payment
+              </Button>
+            )}
+          </Card>
+
           <Card>
             <h2 className="mb-3 text-card-title">Paper and printing</h2>
 
@@ -372,6 +520,96 @@ export function InvoicePage() {
         }}
         onClose={() => setAskPrint(false)}
       />
+
+      {/* --------------------------- Add payment --------------------------- */}
+      <Modal
+        isOpen={paymentOpen}
+        title="Add payment"
+        description={`Outstanding ${data?.shop.currency ?? ''} ${formatAmount(outstanding)}`}
+        onClose={() => setPaymentOpen(false)}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPaymentOpen(false)} disabled={isPaying}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitPayment()} isLoading={isPaying}>
+              Record payment
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          {payError && <Alert tone="error">{payError}</Alert>}
+
+          <Select
+            label="Method"
+            value={payMethod}
+            onChange={(event) => setPayMethod(event.target.value as PaymentMethod)}
+            options={(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((value) => ({
+              value,
+              label: PAYMENT_METHOD_LABELS[value],
+            }))}
+          />
+
+          <MoneyInput
+            label="Amount"
+            value={payAmount}
+            onChange={setPayAmount}
+            hint="Cannot be more than the outstanding amount"
+          />
+
+          {payMethod === 'cash' && (
+            <MoneyInput
+              label="Cash received"
+              value={payTendered}
+              onChange={setPayTendered}
+              hint="Leave at 0 to take the exact amount"
+            />
+          )}
+
+          {payMethod === 'credit' && (
+            <p className="text-caption text-text-secondary">
+              Credit adds this amount to the customer&apos;s udhaar instead of the till.
+            </p>
+          )}
+
+          <Input
+            label="Reference (optional)"
+            value={payReference}
+            onChange={(event) => setPayReference(event.target.value)}
+          />
+        </div>
+      </Modal>
+
+      {/* ----------------------------- Void ----------------------------- */}
+      <Modal
+        isOpen={voidTarget !== null}
+        title="Void this payment"
+        description="The order total goes back to unpaid for that amount. The void is kept in the audit log."
+        onClose={() => setVoidTarget(null)}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setVoidTarget(null)} disabled={isPaying}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={() => void submitVoid()} isLoading={isPaying}>
+              Void payment
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          {payError && <Alert tone="error">{payError}</Alert>}
+          <Input
+            label="Reason"
+            placeholder="Wrong order, customer changed their mind…"
+            value={voidReason}
+            onChange={(event) => setVoidReason(event.target.value)}
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

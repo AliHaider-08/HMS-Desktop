@@ -27,6 +27,8 @@ interface OrderRow {
   tax_percent: number;
   tax: number;
   total: number;
+  paid_amount: number;
+  payment_status: OrderSummary['paymentStatus'];
   notes: string;
   created_at: string;
   created_by_name: string;
@@ -50,6 +52,7 @@ const ORDER_SELECT = `
          w.name AS waiter_name,
          d.name AS delivery_boy_name,
          o.subtotal, o.discount, o.tax_percent, o.tax, o.total, o.notes,
+         o.paid_amount, o.payment_status,
          o.created_at, u.full_name AS created_by_name, i.printed_at
     FROM orders o
     LEFT JOIN invoices i ON i.order_id = o.id
@@ -70,6 +73,8 @@ const toSummary = (row: OrderRow): OrderSummary => ({
   discount: row.discount,
   tax: row.tax,
   total: row.total,
+  paidAmount: row.paid_amount,
+  paymentStatus: row.payment_status,
   createdAt: row.created_at,
   createdByName: row.created_by_name,
   waiterName: row.waiter_name,

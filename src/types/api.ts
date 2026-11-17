@@ -10,7 +10,16 @@ export type UserRole = 'admin' | 'cashier' | 'manager';
 
 /** Pages a role is allowed to open. Enforced in the main process. */
 export type PageKey =
-  'home' | 'orders' | 'menu' | 'staff' | 'vehicles' | 'reports' | 'users' | 'settings';
+  | 'home'
+  | 'orders'
+  | 'menu'
+  | 'staff'
+  | 'vehicles'
+  | 'reports'
+  | 'users'
+  | 'settings'
+  // Phase 2 (3.A) — customer credit ("udhaar") ledger.
+  | 'udhaar';
 
 /** Fine grained write permissions, so a cashier can open the menu but not edit it. */
 export type Capability =
@@ -22,7 +31,12 @@ export type Capability =
   | 'reports:read'
   | 'users:write'
   | 'settings:write'
-  | 'backup:write';
+  | 'backup:write'
+  // Phase 2 (3.A) — payments and the udhaar ledger.
+  | 'payments:write'
+  | 'payments:void'
+  | 'udhaar:read'
+  | 'udhaar:settle';
 
 export interface RolePermissions {
   role: UserRole;
@@ -113,6 +127,60 @@ export interface MenuItemInput {
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
 
+/** How money reached the till. 'credit' means it did not reach it yet (udhaar). */
+export type PaymentMethod = 'cash' | 'card' | 'jazzcash' | 'easypaisa' | 'bank_transfer' | 'credit';
+
+export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'refunded';
+
+export interface Payment {
+  id: number;
+  orderId: number;
+  method: PaymentMethod;
+  amount: number;
+  tendered: number | null;
+  changeDue: number | null;
+  reference: string;
+  createdBy: number;
+  createdAt: string;
+  voidedAt: string | null;
+  voidReason: string;
+}
+
+export interface AddPaymentInput {
+  orderId: number;
+  method: PaymentMethod;
+  amount: number;
+  tendered: number | null;
+  changeDue: number | null;
+  reference: string;
+}
+
+export interface CollectionByMethod {
+  method: PaymentMethod;
+  count: number;
+  total: number;
+}
+
+export interface CustomerLedgerEntry {
+  id: number;
+  customerId: number;
+  orderId: number | null;
+  paymentId: number | null;
+  entryType: 'charge' | 'payment';
+  amount: number;
+  balanceAfter: number;
+  note: string;
+  createdAt: string;
+}
+
+export interface UdhaarAccount {
+  customerId: number;
+  name: string;
+  phone: string;
+  balance: number;
+  lastActivity: string | null;
+}
+
 export interface OrderItemInput {
   itemId: number;
   qty: number;
@@ -155,6 +223,9 @@ export interface OrderSummary {
   discount: number;
   tax: number;
   total: number;
+  /** Money collected so far, read from orders.paid_amount (never recomputed). */
+  paidAmount: number;
+  paymentStatus: PaymentStatus;
   createdAt: string;
   createdByName: string;
   waiterName: string | null;
@@ -494,6 +565,21 @@ export interface OrdersApi {
   savePdf(id: number, paper: '80mm' | 'a4'): Promise<ApiResult<{ path: string | null }>>;
 }
 
+export interface PaymentsApi {
+  addPayment(input: AddPaymentInput): Promise<ApiResult<Payment>>;
+  voidPayment(id: number, reason: string): Promise<ApiResult<Payment>>;
+  listByOrder(orderId: number): Promise<ApiResult<Payment[]>>;
+  udhaarList(): Promise<ApiResult<UdhaarAccount[]>>;
+  udhaarLedger(customerId: number): Promise<ApiResult<CustomerLedgerEntry[]>>;
+  settleUdhaar(input: {
+    customerId: number;
+    method: PaymentMethod;
+    amount: number;
+    reference: string;
+    orderId: number | null;
+  }): Promise<ApiResult<CustomerLedgerEntry>>;
+}
+
 export interface StaffApi {
   listWaiters(): Promise<ApiResult<Waiter[]>>;
   saveWaiter(input: WaiterInput & { id?: number }): Promise<ApiResult<Waiter>>;
@@ -589,6 +675,7 @@ export interface RendererApi {
   reports: ReportsApi;
   settings: SettingsApi;
   users: UsersApi;
+  payments: PaymentsApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -616,6 +703,13 @@ export const CHANNELS = {
   orderMarkPrinted: 'orders:mark-printed',
   orderPrint: 'orders:print',
   orderPdf: 'orders:pdf',
+
+  paymentAdd: 'payment:add',
+  paymentVoid: 'payment:void',
+  paymentListByOrder: 'payment:list-by-order',
+  udhaarList: 'udhaar:list',
+  udhaarSettle: 'udhaar:settle',
+  udhaarLedger: 'udhaar:ledger',
 
   waiters: 'staff:waiters',
   waiterSave: 'staff:waiter-save',

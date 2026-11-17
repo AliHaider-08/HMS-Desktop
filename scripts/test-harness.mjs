@@ -4,7 +4,7 @@
  * against the same code the packaged app runs.
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +16,15 @@ const load = (relative) => require(path.join(compiled, relative));
 
 /** Mirrors electron/main.ts: the month end comes from the shared date helper. */
 const { monthEnd } = load('utils/datetime.js');
+
+/** Highest shipped migration number, read from the compiled migrations folder. */
+function highestMigrationVersion() {
+  const directory = path.join(compiled, 'db', 'migrations');
+  return readdirSync(directory)
+    .filter((file) => /^\d{3,}_.+\.sql$/.test(file))
+    .map((file) => Number(file.slice(0, file.indexOf('_'))))
+    .reduce((highest, version) => Math.max(highest, version), 0);
+}
 
 export function createHarness({ withDemoData = true } = {}) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gulkhan-test-'));
@@ -38,6 +47,7 @@ export function createHarness({ withDemoData = true } = {}) {
     staff: load('db/repositories/staffRepository.js').createStaffRepository(db),
     vehicles: load('db/repositories/vehiclesRepository.js').createVehiclesRepository(db),
     sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
+    payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -92,7 +102,7 @@ export function createHarness({ withDemoData = true } = {}) {
       },
     },
     // The harness applies every shipped migration, so it supports the highest one.
-    { supportedSchemaVersion: 7 },
+    { supportedSchemaVersion: highestMigrationVersion() },
   );
 
   const { renderInvoiceHtml } = load('services/printService.js');
@@ -128,6 +138,10 @@ export function createHarness({ withDemoData = true } = {}) {
     backups,
     print: printStub,
     csv: csvService,
+    payments: load('services/paymentsService.js').createPaymentsService({
+      payments: repositories.payments,
+      orders: repositories.orders,
+    }),
   });
 
   /** Calls a channel exactly like the Electron main process does. */

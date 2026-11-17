@@ -9,9 +9,9 @@ import type { Capability, PageKey, RolePermissions, UserRole } from '../../src/t
  * a manager handles staff, vehicles and reports but not shop settings or users.
  */
 const ROLE_PAGES: Record<UserRole, PageKey[]> = {
-  admin: ['home', 'orders', 'menu', 'staff', 'vehicles', 'reports', 'users', 'settings'],
-  manager: ['home', 'orders', 'menu', 'staff', 'vehicles', 'reports'],
-  cashier: ['home', 'orders', 'menu'],
+  admin: ['home', 'orders', 'menu', 'staff', 'vehicles', 'reports', 'users', 'settings', 'udhaar'],
+  manager: ['home', 'orders', 'menu', 'staff', 'vehicles', 'reports', 'udhaar'],
+  cashier: ['home', 'orders', 'menu', 'udhaar'],
 };
 
 const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
@@ -25,6 +25,10 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'users:write',
     'settings:write',
     'backup:write',
+    'payments:write',
+    'payments:void',
+    'udhaar:read',
+    'udhaar:settle',
   ],
   manager: [
     'orders:write',
@@ -33,8 +37,14 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'staff:write',
     'vehicles:write',
     'reports:read',
+    'payments:write',
+    'payments:void',
+    'udhaar:read',
+    'udhaar:settle',
   ],
-  cashier: ['orders:write'],
+  // A cashier takes payments and may look at udhaar, but cannot void money or settle
+  // a customer account — that is a manager decision.
+  cashier: ['orders:write', 'payments:write', 'udhaar:read'],
 };
 
 export function getRolePermissions(role: UserRole): RolePermissions {

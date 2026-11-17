@@ -53,6 +53,7 @@ const repos = {
   staff: load('db/repositories/staffRepository.js').createStaffRepository(db),
   vehicles: load('db/repositories/vehiclesRepository.js').createVehiclesRepository(db),
   sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
+  payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
 };
 
 const auth = load('services/authService.js').createAuthService(repos.users);
@@ -110,6 +111,10 @@ const registry = buildRegistry({
     reports: reportsService,
     exportDirectory: () => tempDir,
     salarySummary: (month) => reportsService.salarySummary(month),
+  }),
+  payments: load('services/paymentsService.js').createPaymentsService({
+    payments: repos.payments,
+    orders: repos.orders,
   }),
 });
 
