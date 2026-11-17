@@ -70,7 +70,17 @@ export function OrdersPage() {
       header: 'Order',
       render: (row) => (
         <div>
-          <p className="font-medium">{row.orderNo}</p>
+          <p className="flex items-center gap-2 font-medium">
+            {row.orderNo}
+            {row.tokenNo !== null && (
+              <span
+                className="rounded-control bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary"
+                title="Token called out to the customer"
+              >
+                #{row.tokenNo}
+              </span>
+            )}
+          </p>
           <p className="text-caption text-text-secondary">{row.invoiceNo ?? '—'}</p>
         </div>
       ),

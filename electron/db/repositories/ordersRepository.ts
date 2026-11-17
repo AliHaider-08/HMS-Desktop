@@ -15,6 +15,7 @@ interface OrderRow {
   invoice_no: string | null;
   type: OrderType;
   status: OrderStatus;
+  token_no: number | null;
   customer_name: string;
   customer_phone: string;
   customer_address: string;
@@ -46,7 +47,7 @@ interface OrderItemRow {
 }
 
 const ORDER_SELECT = `
-  SELECT o.id, o.order_no, i.invoice_no, o.type, o.status,
+  SELECT o.id, o.order_no, i.invoice_no, o.type, o.status, o.token_no,
          o.customer_name, o.customer_phone, o.customer_address,
          o.waiter_id, o.delivery_boy_id,
          w.name AS waiter_name,
@@ -67,6 +68,7 @@ const toSummary = (row: OrderRow): OrderSummary => ({
   invoiceNo: row.invoice_no,
   type: row.type,
   status: row.status,
+  tokenNo: row.token_no,
   customerName: row.customer_name,
   customerPhone: row.customer_phone,
   subtotal: row.subtotal,
@@ -108,12 +110,12 @@ export function createOrdersRepository(db: AppDatabase) {
       order_no, type, customer_id, customer_name, customer_phone, customer_address,
       waiter_id, delivery_boy_id, status, subtotal, discount, tax_percent, tax, total,
       notes, created_by, created_at, updated_at,
-      discount_reason, promo_code, approved_by
+      discount_reason, promo_code, approved_by, token_no
     ) VALUES (
       @orderNo, @type, @customerId, @customerName, @customerPhone, @customerAddress,
       @waiterId, @deliveryBoyId, @status, @subtotal, @discount, @taxPercent, @tax, @total,
       @notes, @createdBy, @now, @now,
-      @discountReason, @promoCode, @approvedBy
+      @discountReason, @promoCode, @approvedBy, @tokenNo
     )
   `);
   const insertOrderItem = db.prepare(`
@@ -186,6 +188,8 @@ export function createOrdersRepository(db: AppDatabase) {
       invoiceNo: string;
       type: OrderType;
       status: OrderStatus;
+      /** Customer-facing token, allocated by kotRepository inside this transaction. */
+      tokenNo: number | null;
       customerName: string;
       customerPhone: string;
       customerAddress: string;
@@ -229,6 +233,7 @@ export function createOrdersRepository(db: AppDatabase) {
           discountReason: payload.discountReason ?? '',
           promoCode: payload.promoCode ?? '',
           approvedBy: payload.approvedBy ?? null,
+          tokenNo: payload.tokenNo ?? null,
           orderNo: payload.orderNo,
           type: payload.type,
           customerId,

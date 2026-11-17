@@ -69,6 +69,11 @@ const api: RendererApi = {
     deletePromo: (id) => invoke(CHANNELS.promoDelete, { id }),
   },
 
+  kot: {
+    ticket: (orderId) => invoke(CHANNELS.kotTicket, { orderId }),
+    print: (orderId) => invoke(CHANNELS.kotPrint, { orderId }),
+  },
+
   staff: {
     listWaiters: () => invoke(CHANNELS.waiters),
     saveWaiter: (input) => invoke(CHANNELS.waiterSave, input),

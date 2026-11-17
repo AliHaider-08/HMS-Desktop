@@ -44,6 +44,7 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'shifts:write',
     'discount:write',
     'discount:approve',
+    'kot:print',
   ],
   manager: [
     'orders:write',
@@ -60,6 +61,7 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'shifts:write',
     'discount:write',
     'discount:approve',
+    'kot:print',
   ],
   // A cashier takes payments and may look at udhaar, but cannot void money or settle
   // a customer account — that is a manager decision.
@@ -72,6 +74,7 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'shifts:read',
     'shifts:write',
     'discount:write',
+    'kot:print',
   ],
 };
 

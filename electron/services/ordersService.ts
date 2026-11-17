@@ -16,6 +16,7 @@ import type { UserRepository } from '../db/repositories/userRepository';
 import { percentOf } from '../utils/money';
 import { toSqlDate } from '../utils/datetime';
 import type { DiscountsService } from './discountsService';
+import type { KotRepository } from '../db/repositories/kotRepository';
 import { AppError } from '../utils/errors';
 import { logInfo } from './logger';
 
@@ -37,10 +38,12 @@ export function createOrdersService(deps: {
   users: UserRepository;
   /** Optional so the service still works in isolation; see createOrder's discount check. */
   discounts?: DiscountsService;
+  /** Optional so the service still boots without the kitchen module. */
+  kot?: KotRepository;
 }) {
   // `users` is kept in the dependency list because invoices record the cashier name
   // through the orders query; it is available for later phases (audit fields).
-  const { orders, catalog, sequences, settings, staff, discounts } = deps;
+  const { orders, catalog, sequences, settings, staff, discounts, kot } = deps;
 
   function findOrFail(id: number): OrderDetail {
     const order = orders.find(id);
@@ -161,11 +164,17 @@ export function createOrdersService(deps: {
         const orderNumber = sequences.next('order');
         const invoiceNumber = sequences.next('invoice');
 
+        // A token is the number called out to the customer. Delivery orders get
+        // none: the rider knows the address, and a token would only confuse the
+        // queue of people waiting at the counter.
+        const tokenNo = input.type === 'delivery' ? null : (kot?.nextToken() ?? null);
+
         const newOrderId = orders.create({
           orderNo: `${orderPrefix}-${String(orderNumber).padStart(5, '0')}`,
           invoiceNo: `${invoicePrefix}-${String(invoiceNumber).padStart(5, '0')}`,
           type: input.type,
           status: input.status,
+          tokenNo,
           customerName: input.customerName,
           customerPhone: input.customerPhone,
           customerAddress: input.customerAddress,

@@ -247,7 +247,20 @@ export function NewOrderPage() {
         }
       }
 
-      toast.success(`Order ${created.orderNo} saved`);
+      // The kitchen slip goes out as soon as the order exists. A failure here must
+      // not lose the order — it is already saved and paid — so it is reported and
+      // the invoice screen can reprint it.
+      try {
+        await getApi().kot.print(created.id);
+      } catch (kotError) {
+        toast.error(errorMessage(kotError, 'The kitchen ticket could not be printed'));
+      }
+
+      toast.success(
+        created.tokenNo !== null
+          ? `Order ${created.orderNo} saved · Token ${created.tokenNo}`
+          : `Order ${created.orderNo} saved`,
+      );
       navigate(`/invoice/${created.id}`, { state: { autoPrint: thenPrint } });
     } catch (saveError) {
       setError(errorMessage(saveError, 'The order could not be saved'));

@@ -209,6 +209,8 @@ export async function seedDemoData(deps: {
       invoiceNo: `INV-${String(invoiceNumber).padStart(5, '0')}`,
       type: entry.type,
       status: entry.daysAgo === 0 ? 'preparing' : 'delivered',
+      // Demo orders are backdated, so they deliberately take no token.
+      tokenNo: null,
       customerName: entry.type === 'dine_in' ? '' : 'Walk-in Customer',
       customerPhone: '',
       customerAddress: entry.type === 'delivery' ? 'House 12, Street 3, Islamabad' : '',

@@ -56,6 +56,24 @@ const repos = {
   payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
   shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
   discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
+  kot: load('db/repositories/kotRepository.js').createKotRepository(db),
+};
+
+// Printing needs a real window. The preview throws so the UI reports it honestly,
+// but the HTML builders are the real ones, so the screen shows the actual ticket.
+const printStub = {
+  printInvoice: async () => {
+    throw new Error('Printing is not available in the browser preview');
+  },
+  savePdf: async () => null,
+  printShiftReport: async () => {
+    throw new Error('Printing is not available in the browser preview');
+  },
+  printKot: async () => {
+    throw new Error('Printing is not available in the browser preview');
+  },
+  renderHtml: load('services/printService.js').renderInvoiceHtml,
+  renderKotHtml: load('services/printService.js').renderKotHtml,
 };
 
 const auth = load('services/authService.js').createAuthService(repos.users);
@@ -90,6 +108,7 @@ const registry = buildRegistry({
     staff: repos.staff,
     users: repos.users,
     discounts: discountsService,
+    kot: repos.kot,
   }),
   staff: staffService,
   vehicles: load('services/vehiclesService.js').createVehiclesService({
@@ -107,16 +126,7 @@ const registry = buildRegistry({
       replaceWith: () => undefined,
     },
   ),
-  print: {
-    printInvoice: async () => {
-      throw new Error('Printing is not available in the browser preview');
-    },
-    savePdf: async () => null,
-    printShiftReport: async () => {
-      throw new Error('Printing is not available in the browser preview');
-    },
-    renderHtml: load('services/printService.js').renderInvoiceHtml,
-  },
+  print: printStub,
   csv: load('services/csvService.js').createCsvService({
     reports: reportsService,
     exportDirectory: () => tempDir,
@@ -131,6 +141,11 @@ const registry = buildRegistry({
     orders: repos.orders,
   }),
   discounts: discountsService,
+  kot: load('services/kotService.js').createKotService({
+    kot: repos.kot,
+    print: printStub,
+    settings: repos.settings,
+  }),
 });
 
 const { seedDefaultAdmin } = load('db/seed.js');

@@ -452,3 +452,8 @@ export const promoSchema = z
     message: 'A promo percentage cannot exceed 100%',
     path: ['value'],
   });
+
+/** Kitchen ticket lookup and print, both addressed by order id. */
+export const kotPrintSchema = z.object({
+  orderId: idField,
+});

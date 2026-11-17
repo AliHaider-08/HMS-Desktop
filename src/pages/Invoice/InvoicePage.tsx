@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, FileDown, Printer } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChefHat, FileDown, Printer } from 'lucide-react';
 import type { InvoiceData, OrderStatus, Payment, PaymentMethod } from '../../types/api';
 import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
@@ -38,6 +38,7 @@ export function InvoicePage() {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [askPrint, setAskPrint] = useState(false);
+  const [isPrintingKot, setIsPrintingKot] = useState(false);
 
   // Payments for this order (feature 3.A).
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -78,6 +79,26 @@ export function InvoicePage() {
       total: data.order.total,
     };
   }, [data]);
+
+  /**
+   * Sends the kitchen ticket. The main process builds the slip from the stored
+   * order — this screen never assembles prices or quantities for it.
+   */
+  const printKot = async () => {
+    setIsPrintingKot(true);
+    try {
+      const result = unwrap(await getApi().kot.print(orderId));
+      if (result.printed) {
+        toast.success('Kitchen ticket sent');
+      } else {
+        toast.info('Printing was cancelled');
+      }
+    } catch (error) {
+      toast.error(errorMessage(error, 'The kitchen ticket could not be printed'));
+    } finally {
+      setIsPrintingKot(false);
+    }
+  };
 
   const printNow = async (openDialogFirst = false) => {
     if (!data) return;
@@ -221,6 +242,15 @@ export function InvoicePage() {
               <FileDown aria-hidden className="h-4 w-4" />
               Save PDF
             </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void printKot()}
+              isLoading={isPrintingKot}
+              disabled={!data || data.order.status === 'cancelled'}
+            >
+              <ChefHat aria-hidden className="h-4 w-4" />
+              Kitchen ticket
+            </Button>
             <Button onClick={() => void printNow()} isLoading={isPrinting} disabled={!data}>
               <Printer aria-hidden className="h-4 w-4" />
               Print
@@ -256,6 +286,12 @@ export function InvoicePage() {
               <span>Order</span>
               <span>{data?.order.orderNo ?? '—'}</span>
             </div>
+            {data?.order.tokenNo !== null && data?.order.tokenNo !== undefined && (
+              <div className="flex items-center justify-between font-bold">
+                <span>Token</span>
+                <span className="text-[18px]">{data.order.tokenNo}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span>Date</span>
               <span>{data ? formatDate(data.order.createdAt) : '—'}</span>

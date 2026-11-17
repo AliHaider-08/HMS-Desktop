@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import { writeFileSync } from 'node:fs';
-import type { InvoiceData, ShiftReport } from '../../src/types/api';
+import type { InvoiceData, KOT, ShiftReport } from '../../src/types/api';
 import { formatAmount } from '../utils/money';
 import { formatDate, formatDateTime, toSqlDate } from '../utils/datetime';
 import { AppError } from '../utils/errors';
@@ -71,6 +71,8 @@ export function renderInvoiceHtml(data: InvoiceData, paper: PaperSize): string {
       .note { color: #6B7280; font-size: ${isThermal ? '9px' : '11px'}; }
       .qty { width: 12%; text-align: center; }
       .amount { width: 21%; text-align: right; font-variant-numeric: tabular-nums; }
+      .token-label { font-weight: 700; }
+      .token { font-weight: 700; font-size: ${isThermal ? '16px' : '20px'}; }
       .totals { margin-top: 6px; }
       .totals div { display: flex; justify-content: space-between; padding: 1px 0; }
       .grand { font-size: ${isThermal ? '14px' : '17px'}; font-weight: 700; border-top: 1px solid #1F2937;
@@ -92,6 +94,11 @@ export function renderInvoiceHtml(data: InvoiceData, paper: PaperSize): string {
     <div class="meta">
       <div><span>Invoice</span><span>${escapeHtml(order.invoiceNo ?? order.orderNo)}</span></div>
       <div><span>Order</span><span>${escapeHtml(order.orderNo)}</span></div>
+      ${
+        order.tokenNo !== null
+          ? `<div><span class="token-label">Token</span><span class="token">${order.tokenNo}</span></div>`
+          : ''
+      }
       <div><span>Date</span><span>${formatDate(order.createdAt)}</span></div>
       <div><span>Time</span><span>${formatDateTime(order.createdAt).split(', ')[1] ?? ''}</span></div>
       <div><span>Cashier</span><span>${escapeHtml(cashierName)}</span></div>
@@ -160,6 +167,92 @@ const PAYMENT_METHOD_TEXT: Record<string, string> = {
  * Printable X (open shift) / Z (closed shift) report (feature 3.B).
  * Same look as the invoice so one thermal printer serves both.
  */
+/**
+ * Kitchen order ticket (feature 3.D).
+ *
+ * Two rules make this different from an invoice:
+ *   1. **No prices anywhere.** The kitchen works from quantities, and a ticket
+ *      lying on a counter should not advertise the bill.
+ *   2. **Large type.** It is read from a distance, in a hurry, often in steam.
+ * A reprint says so, so nobody cooks the same order twice by accident.
+ */
+export function renderKotHtml(kot: KOT, shopName: string): string {
+  const isReprint = kot.printCount > 0;
+
+  const rows = kot.items
+    .map(
+      (item) => `
+        <tr>
+          <td class="qty">${item.qty}</td>
+          <td class="item">
+            ${escapeHtml(item.name)}
+            ${item.notes ? `<div class="note">>> ${escapeHtml(item.notes)}</div>` : ''}
+          </td>
+        </tr>`,
+    )
+    .join('');
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>KOT ${escapeHtml(kot.orderNo)}</title>
+<style>
+  @page { size: 80mm auto; margin: 2mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; color: #111;
+         margin: 0; width: 76mm; }
+  .center { text-align: center; }
+  .token { font-size: 42px; font-weight: 700; line-height: 1; margin: 2px 0; }
+  .token-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; }
+  .type { font-size: 15px; font-weight: 700; text-transform: uppercase; }
+  .reprint { border: 2px solid #111; font-weight: 700; text-align: center; padding: 2px;
+             margin: 4px 0; text-transform: uppercase; }
+  hr { border: none; border-top: 1px dashed #111; margin: 5px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 10px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #111; }
+  td { padding: 3px 0; vertical-align: top; }
+  .qty { width: 16%; text-align: center; font-size: 20px; font-weight: 700; }
+  .item { width: 84%; font-size: 14px; }
+  .note { font-size: 10px; font-style: italic; }
+  .meta { font-size: 10px; }
+  .meta div { display: flex; justify-content: space-between; }
+  .order-note { border: 1px solid #111; padding: 3px; margin-top: 6px; font-size: 11px; }
+  .foot { margin-top: 6px; text-align: center; font-size: 9px; }
+</style>
+</head>
+<body>
+  <div class="center">
+    <div class="token-label">Token</div>
+    <div class="token">${kot.tokenNo ?? '&mdash;'}</div>
+  </div>
+
+  <hr />
+
+  <div class="center type">${ORDER_TYPE_TEXT[kot.type] ?? kot.type}</div>
+  ${isReprint ? '<div class="reprint">Reprint &mdash; do not cook twice</div>' : ''}
+
+  <div class="meta">
+    <div><span>Order</span><span>${escapeHtml(kot.orderNo)}</span></div>
+    <div><span>Time</span><span>${escapeHtml(kot.createdAt)}</span></div>
+    ${kot.waiterName ? `<div><span>Waiter</span><span>${escapeHtml(kot.waiterName)}</span></div>` : ''}
+    ${kot.customerName ? `<div><span>Name</span><span>${escapeHtml(kot.customerName)}</span></div>` : ''}
+  </div>
+
+  <hr />
+
+  <table>
+    <thead><tr><th class="qty">Qty</th><th>Item</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+
+  ${kot.notes ? `<div class="order-note">Note: ${escapeHtml(kot.notes)}</div>` : ''}
+
+  <div class="foot">${escapeHtml(shopName)}</div>
+</body>
+</html>`;
+}
+
 export function renderShiftReportHtml(data: ShiftReport, paper: PaperSize): string {
   const isThermal = paper === '80mm';
   const { shift } = data;
@@ -356,6 +449,33 @@ export function createPrintService(deps: PrintServiceDeps) {
       }
     },
 
+    /**
+     * Prints a kitchen ticket on the thermal roll, without a prices column.
+     * Which printer receives it is decided by the Windows default printer, so a
+     * shop with a separate kitchen printer sets that one as default.
+     */
+    async printKot(kot: KOT, shopName: string): Promise<boolean> {
+      try {
+        return await withHtmlWindow(renderKotHtml(kot, shopName), '80mm', async (printWindow) => {
+          const printed = await new Promise<boolean>((resolve) => {
+            printWindow.webContents.print(
+              {
+                silent: false,
+                printBackground: true,
+                margins: { marginType: 'none' },
+                pageSize: { width: 80_000, height: 297_000 },
+              },
+              (success) => resolve(success),
+            );
+          });
+          return printed;
+        });
+      } catch (error) {
+        logError('Printing the kitchen ticket failed', error);
+        throw new AppError('PRINT_ERROR', 'The kitchen ticket could not be printed.');
+      }
+    },
+
     /** Prints an X/Z report through the same hidden-window pattern as invoices. */
     async printShiftReport(data: ShiftReport, paper: PaperSize): Promise<boolean> {
       try {
@@ -412,6 +532,8 @@ export function createPrintService(deps: PrintServiceDeps) {
 
     /** Used by the invoice preview in the renderer. */
     renderHtml: renderInvoiceHtml,
+    /** Renderers use this for an on-screen kitchen ticket preview. */
+    renderKotHtml,
   };
 }
 

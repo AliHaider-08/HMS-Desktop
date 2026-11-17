@@ -27,6 +27,8 @@ import { createCsvService } from './services/csvService';
 import { createPaymentsService } from './services/paymentsService';
 import { createShiftsService } from './services/shiftsService';
 import { createDiscountsService } from './services/discountsService';
+import { createKotService } from './services/kotService';
+import { createKotRepository } from './db/repositories/kotRepository';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
@@ -98,6 +100,7 @@ async function bootstrapServices(): Promise<void> {
   const paymentsRepo = createPaymentsRepository(db);
   const shiftsRepo = createShiftsRepository(db);
   const discountsRepo = createDiscountsRepository(db);
+  const kotRepo = createKotRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -219,6 +222,8 @@ async function bootstrapServices(): Promise<void> {
       users,
       // The discount rule is enforced inside create(), so it must be wired in.
       discounts: discountsService,
+      // Allocates the customer token inside the order transaction.
+      kot: kotRepo,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: vehiclesRepo, staff: staffRepo }),
@@ -231,6 +236,7 @@ async function bootstrapServices(): Promise<void> {
     payments: createPaymentsService({ payments: paymentsRepo, orders: ordersRepo }),
     shifts: createShiftsService({ shifts: shiftsRepo, orders: ordersRepo }),
     discounts: discountsService,
+    kot: createKotService({ kot: kotRepo, print: printService, settings: settingsRepo }),
   });
 }
 

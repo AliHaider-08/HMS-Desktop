@@ -44,7 +44,8 @@ export type Capability =
   | 'shifts:write'
   // Phase 2 (3.C) — discount rules and manager approval.
   | 'discount:write'
-  | 'discount:approve';
+  | 'discount:approve'
+  | 'kot:print';
 
 export interface RolePermissions {
   role: UserRole;
@@ -335,6 +336,7 @@ export interface OrderSummary {
   invoiceNo: string | null;
   type: OrderType;
   status: OrderStatus;
+  tokenNo: number | null;
   customerName: string;
   customerPhone: string;
   subtotal: number;
@@ -367,6 +369,37 @@ export interface OrderFilter {
   fromDate: string;
   toDate: string;
   limit: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Kitchen tickets and tokens (feature 3.D)                            */
+/* ------------------------------------------------------------------ */
+
+export interface KOTItem {
+  /** order_items.id — lets a reprint target specific lines later. */
+  id: number;
+  name: string;
+  qty: number;
+  notes: string;
+}
+
+/**
+ * A kitchen ticket. Deliberately has no prices: the kitchen works from what to
+ * cook, not from what the customer paid.
+ */
+export interface KOT {
+  orderId: number;
+  orderNo: string;
+  tokenNo: number | null;
+  type: OrderType;
+  status: OrderStatus;
+  customerName: string;
+  waiterName: string | null;
+  notes: string;
+  createdAt: string;
+  items: KOTItem[];
+  /** 0 means this is the first print; anything else is a reprint. */
+  printCount: number;
 }
 
 export interface InvoiceData {
@@ -720,6 +753,13 @@ export interface DiscountsApi {
   deletePromo(id: number): Promise<ApiResult<null>>;
 }
 
+export interface KotApi {
+  /** The ticket for one order. Read-only; no side effects. */
+  ticket(orderId: number): Promise<ApiResult<KOT>>;
+  /** Renders and prints the kitchen ticket; records the print in kot_prints. */
+  print(orderId: number): Promise<ApiResult<{ printed: boolean }>>;
+}
+
 export interface ShiftsApi {
   current(): Promise<ApiResult<Shift | null>>;
   open(openingCash: number): Promise<ApiResult<Shift>>;
@@ -832,6 +872,7 @@ export interface RendererApi {
   payments: PaymentsApi;
   shifts: ShiftsApi;
   discounts: DiscountsApi;
+  kot: KotApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -882,6 +923,10 @@ export const CHANNELS = {
   promoList: 'promo:list',
   promoSave: 'promo:save',
   promoDelete: 'promo:delete',
+
+  // Kitchen tickets (feature 3.D)
+  kotTicket: 'kot:ticket',
+  kotPrint: 'kot:print',
 
   waiters: 'staff:waiters',
   waiterSave: 'staff:waiter-save',

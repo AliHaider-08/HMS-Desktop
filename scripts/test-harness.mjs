@@ -50,6 +50,7 @@ export function createHarness({ withDemoData = true } = {}) {
     payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
     shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
     discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
+    kot: load('db/repositories/kotRepository.js').createKotRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -124,7 +125,9 @@ export function createHarness({ withDemoData = true } = {}) {
     },
     savePdf: async () => null,
     printShiftReport: async () => true,
+    printKot: async () => true,
     renderHtml: renderInvoiceHtml,
+    renderKotHtml: load('services/printService.js').renderKotHtml,
   };
 
   const registry = buildRegistry({
@@ -138,6 +141,7 @@ export function createHarness({ withDemoData = true } = {}) {
       staff: repositories.staff,
       users: repositories.users,
       discounts: discountsService,
+      kot: repositories.kot,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: repositories.vehicles, staff: repositories.staff }),
@@ -156,6 +160,11 @@ export function createHarness({ withDemoData = true } = {}) {
       orders: repositories.orders,
     }),
     discounts: discountsService,
+    kot: load('services/kotService.js').createKotService({
+      kot: repositories.kot,
+      print: printStub,
+      settings: repositories.settings,
+    }),
   });
 
   /** Calls a channel exactly like the Electron main process does. */
