@@ -144,6 +144,7 @@ export function createHarness({ withDemoData = true } = {}) {
       discounts: discountsService,
       kot: repositories.kot,
       tables: repositories.tables,
+      payments: repositories.payments,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: repositories.vehicles, staff: repositories.staff }),

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CHANNELS, type NewOrderInput, type OrderStatus } from '../../src/types/api';
-import { newOrderSchema, orderFilterSchema } from '../../src/types/schemas';
+import { amendOrderSchema, newOrderSchema, orderFilterSchema } from '../../src/types/schemas';
+import type { AmendOrderInput } from '../../src/types/api';
 import type { OrdersService } from '../services/ordersService';
 import { roleHasCapability } from '../services/permissions';
 import { AppError } from '../utils/errors';
@@ -17,6 +18,22 @@ export function ordersHandlers(orders: OrdersService, print: PrintService): Hand
       schema: newOrderSchema,
       handler: (input: NewOrderInput, context: HandlerContext) =>
         orders.create(input, context.user.id, context.user.role),
+    },
+
+    [CHANNELS.orderAmend]: {
+      // Editing a saved bill is a manager-level act in most shops, but a cashier
+      // adds "one more naan" constantly. The service enforces what actually
+      // protects the money: the paid total cannot be broken, and the discount is
+      // re-checked against the role of the person doing the editing.
+      capability: 'orders:write',
+      schema: amendOrderSchema,
+      handler: (input: AmendOrderInput, context: HandlerContext) =>
+        orders.amend(input, context.user.id, context.user.role),
+    },
+
+    [CHANNELS.orderAmendments]: {
+      schema: idSchema,
+      handler: (input: { id: number }) => orders.amendments(input.id),
     },
 
     [CHANNELS.orderList]: {

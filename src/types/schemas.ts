@@ -499,3 +499,28 @@ export const splitSchema = z
     message: 'The same line was selected twice',
     path: ['itemIds'],
   });
+
+export const amendOrderSchema = z.object({
+  id: idField,
+  reason: z
+    .string(message)
+    .trim()
+    .min(3, 'Say why the bill is being changed')
+    .max(200, 'Keep the reason short'),
+  items: z
+    .array(
+      z.object({
+        itemId: idField,
+        qty: z.number(message).int().min(1, 'Quantity must be at least 1').max(999),
+        notes: optionalText(120, 'Item note'),
+      }),
+    )
+    .min(1, 'A bill needs at least one line. Cancel it instead.'),
+  discount: paisaField.default(0),
+  approvedBy: z.number(message).int().positive().nullable().default(null),
+  customerName: optionalText(80, 'Customer name'),
+  customerPhone: optionalText(20, 'Phone'),
+  customerAddress: optionalText(200, 'Address'),
+  waiterId: z.number(message).int().positive().nullable().default(null),
+  notes: optionalText(300, 'Notes'),
+});

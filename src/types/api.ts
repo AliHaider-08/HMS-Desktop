@@ -343,6 +343,8 @@ export interface OrderSummary {
   type: OrderType;
   status: OrderStatus;
   tokenNo: number | null;
+  /** How many times this bill has been edited (0 = untouched). */
+  amendmentCount: number;
   /** Set when this bill was merged into another one; its money stayed here. */
   mergedIntoOrderId: number | null;
   /** Set when this bill was carved out of another one. */
@@ -368,6 +370,8 @@ export interface OrderDetail extends OrderSummary {
   customerAddress: string;
   waiterId: number | null;
   deliveryBoyId: number | null;
+  /** Who approved the discount on this bill, when one was needed. */
+  approvedBy: number | null;
   taxPercent: number;
   notes: string;
   printedAt: string | null;
@@ -400,6 +404,44 @@ export interface DiningTable {
   openTotal: number;
   /** Total of everything ever rung up at this table, for the owner's report. */
   lifetimeSales: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Order amendments (Phase 3)                                          */
+/* ------------------------------------------------------------------ */
+
+/** What a bill looked like at one point in its life, for the history view. */
+export interface AmendmentSnapshot {
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  items: Array<{ itemId: number; name: string; qty: number; price: number; lineTotal: number }>;
+}
+
+export interface OrderAmendment {
+  version: number;
+  reason: string;
+  before: AmendmentSnapshot;
+  after: AmendmentSnapshot;
+  changedByName: string;
+  createdAt: string;
+}
+
+export interface AmendOrderInput {
+  id: number;
+  /** Why the bill is being changed. Mandatory: it is the audit trail. */
+  reason: string;
+  /** The complete new set of lines. Replaces what was there. */
+  items: Array<{ itemId: number; qty: number; notes: string }>;
+  discount: number;
+  /** Set when the new discount needs a manager's approval. */
+  approvedBy?: number | null;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  waiterId?: number | null;
+  notes?: string;
 }
 
 export interface MergeResult {
@@ -752,6 +794,10 @@ export interface OrdersApi {
   create(input: NewOrderInput): Promise<ApiResult<OrderDetail>>;
   list(filter: OrderFilter): Promise<ApiResult<OrderSummary[]>>;
   get(id: number): Promise<ApiResult<OrderDetail>>;
+  /** Replaces the lines of a saved bill, keeping a full snapshot of both versions. */
+  amend(input: AmendOrderInput): Promise<ApiResult<OrderDetail>>;
+  /** The edit history, oldest first. */
+  amendments(id: number): Promise<ApiResult<OrderAmendment[]>>;
   updateStatus(id: number, status: OrderStatus): Promise<ApiResult<OrderSummary>>;
   cancel(id: number): Promise<ApiResult<OrderSummary>>;
   invoice(id: number): Promise<ApiResult<InvoiceData>>;
@@ -999,6 +1045,10 @@ export const CHANNELS = {
   tableDelete: 'table:delete',
   orderMerge: 'order:merge',
   orderSplit: 'order:split',
+
+  // Order amendments (Phase 3)
+  orderAmend: 'order:amend',
+  orderAmendments: 'order:amendments',
 
   waiters: 'staff:waiters',
   waiterSave: 'staff:waiter-save',

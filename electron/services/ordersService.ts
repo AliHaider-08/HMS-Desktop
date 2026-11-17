@@ -1,5 +1,8 @@
 import type {
+  AmendOrderInput,
+  AmendmentSnapshot,
   InvoiceData,
+  OrderAmendment,
   NewOrderInput,
   OrderDetail,
   OrderFilter,
@@ -13,11 +16,12 @@ import type { SequenceRepository } from '../db/repositories/sequenceRepository';
 import type { SettingsRepository } from '../db/repositories/settingsRepository';
 import type { StaffRepository } from '../db/repositories/staffRepository';
 import type { UserRepository } from '../db/repositories/userRepository';
-import { percentOf } from '../utils/money';
+import { formatAmount, percentOf } from '../utils/money';
 import { toSqlDate } from '../utils/datetime';
 import type { DiscountsService } from './discountsService';
 import type { KotRepository } from '../db/repositories/kotRepository';
 import type { TablesRepository } from '../db/repositories/tablesRepository';
+import type { PaymentsRepository } from '../db/repositories/paymentsRepository';
 import { AppError } from '../utils/errors';
 import { logInfo } from './logger';
 
@@ -43,10 +47,15 @@ export function createOrdersService(deps: {
   kot?: KotRepository;
   /** Optional: the floor plan. Without it, dine-in orders are simply unseated. */
   tables?: TablesRepository;
+  /** Optional: needed to know how much has been collected before an amendment. */
+  payments?: PaymentsRepository;
 }) {
   // `users` is kept in the dependency list because invoices record the cashier name
   // through the orders query; it is available for later phases (audit fields).
-  const { orders, catalog, sequences, settings, staff, discounts, kot, tables } = deps;
+  const { orders, catalog, sequences, settings, staff, discounts, kot, tables, payments } = deps;
+
+  /** Money actually collected on a bill (voided payments excluded). */
+  const paymentsSum = (orderId: number): number => payments?.sumByOrder(orderId) ?? 0;
 
   function findOrFail(id: number): OrderDetail {
     const order = orders.find(id);
@@ -253,6 +262,166 @@ export function createOrdersService(deps: {
       orders.updateStatus(id, status);
       logInfo(`Order ${order.orderNo} status: ${order.status} -> ${status}`);
       return orders.find(id) as OrderSummary;
+    },
+
+    /**
+     * Replaces the lines of a saved bill (Phase 3 amendments).
+     *
+     * Three rules make this safe to expose to a till:
+     *
+     *  1. **What is already paid is untouchable.** The new total must not drop
+     *     below the money already collected — there is no refund screen that could
+     *     put the difference back, so the amendment is refused instead.
+     *  2. **The discount is re-checked for the role of the person editing.** A
+     *     cashier cannot amend their way around the ceiling they could not pass at
+     *     the till.
+     *  3. **Both versions are snapshotted.** The bill before and after is written to
+     *     order_amendments in the same transaction as the change.
+     */
+    amend(input: AmendOrderInput, editedBy: number, role: UserRole): OrderDetail {
+      const order = findOrFail(input.id);
+
+      if (order.status === 'cancelled') {
+        throw new AppError('CONFLICT', 'A cancelled bill cannot be changed');
+      }
+      if (order.mergedIntoOrderId !== null) {
+        throw new AppError('CONFLICT', 'This bill was merged into another one. Edit that bill.');
+      }
+
+      // Prices come from the menu, never from the renderer.
+      const lines = input.items.map((line) => {
+        const item = catalog.findItem(line.itemId);
+        if (!item) throw new AppError('NOT_FOUND', `Item ${line.itemId} no longer exists`);
+
+        return {
+          itemId: item.id,
+          name: item.name,
+          price: item.price,
+          qty: line.qty,
+          lineTotal: item.price * line.qty,
+          notes: line.notes,
+        };
+      });
+
+      const subtotal = lines.reduce((total, line) => total + line.lineTotal, 0);
+
+      if (input.discount > subtotal) {
+        throw new AppError('VALIDATION_ERROR', 'Discount subtotal se zyada nahi ho sakta.');
+      }
+
+      // ---- the money already taken cannot be undone here ----
+      const paid = paymentsSum(order.id);
+      if (paid > 0 && subtotal - input.discount < paid) {
+        throw new AppError(
+          'CONFLICT',
+          `This bill already has ${formatAmount(paid)} paid on it. The new total cannot be lower than that.`,
+        );
+      }
+
+      // ---- the discount rule, for the role of the person editing ----
+      let approvedBy: number | null = order.approvedBy;
+      if (discounts && input.discount > 0) {
+        const decision = discounts.resolve({
+          role,
+          subtotal,
+          percentX100: 0,
+          amount: input.discount,
+          promoCode: '',
+          today: toSqlDate(),
+        });
+
+        if (decision.errors.length > 0) {
+          throw new AppError('VALIDATION_ERROR', decision.errors[0] ?? 'Discount is not allowed');
+        }
+
+        if (decision.needsApproval) {
+          const approvalId = input.approvedBy;
+          if (typeof approvalId !== 'number') {
+            throw new AppError(
+              'FORBIDDEN',
+              'This discount needs a manager approval before the bill can be changed',
+            );
+          }
+
+          const approval = discounts.findApproval(approvalId);
+          if (!approval || approval.amount !== input.discount || approval.orderId !== null) {
+            throw new AppError('FORBIDDEN', 'That discount approval does not match this change');
+          }
+          approvedBy = approval.approvedBy;
+        }
+      }
+
+      const taxable = subtotal - input.discount;
+      const tax = percentOf(taxable, order.taxPercent);
+      const total = taxable + tax;
+
+      const before: AmendmentSnapshot = {
+        subtotal: order.subtotal,
+        discount: order.discount,
+        tax: order.tax,
+        total: order.total,
+        items: order.items.map((line) => ({
+          itemId: line.itemId,
+          name: line.name,
+          qty: line.qty,
+          price: line.price,
+          lineTotal: line.lineTotal,
+        })),
+      };
+
+      const after: AmendmentSnapshot = {
+        subtotal,
+        discount: input.discount,
+        tax,
+        total,
+        items: lines.map((line) => ({
+          itemId: line.itemId,
+          name: line.name,
+          qty: line.qty,
+          price: line.price,
+          lineTotal: line.lineTotal,
+        })),
+      };
+
+      orders.transaction(() => {
+        // Lines are replaced wholesale: an amendment states the full new bill, which
+        // is far easier to reason about than a stream of add/remove deltas.
+        for (const line of order.items) orders.removeItem(line.id);
+        orders.insertItems(order.id, lines);
+
+        orders.updateDetails(order.id, {
+          customerName: input.customerName ?? order.customerName,
+          customerPhone: input.customerPhone ?? order.customerPhone,
+          customerAddress: input.customerAddress ?? order.customerAddress,
+          waiterId: input.waiterId ?? order.waiterId,
+          notes: input.notes ?? order.notes,
+        });
+
+        orders.setTotals(order.id, { subtotal, discount: input.discount, tax, total, approvedBy });
+
+        orders.recordAmendment({
+          orderId: order.id,
+          reason: input.reason,
+          beforeJson: JSON.stringify(before),
+          afterJson: JSON.stringify(after),
+          changedBy: editedBy,
+        });
+
+        if (typeof input.approvedBy === 'number' && approvedBy !== null) {
+          discounts?.consumeApproval(input.approvedBy, order.id);
+        }
+      });
+
+      logInfo(
+        `Order ${order.orderNo} amended: ${before.total} -> ${total} paisa (${input.reason})`,
+      );
+
+      return findOrFail(order.id);
+    },
+
+    amendments(id: number): OrderAmendment[] {
+      findOrFail(id);
+      return orders.amendmentsFor(id) as OrderAmendment[];
     },
 
     cancel(id: number): OrderSummary {

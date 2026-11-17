@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, ChefHat, FileDown, Printer } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChefHat, FileDown, PencilLine, Printer } from 'lucide-react';
 import type { InvoiceData, OrderStatus, Payment, PaymentMethod } from '../../types/api';
 import { ORDER_STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
@@ -17,6 +17,7 @@ import { Input } from '../../components/Input';
 import { MoneyInput } from '../../components/MoneyInput';
 import { Alert } from '../../components/Alert';
 import { toast } from '../../components/Toast';
+import { AmendDialog } from './AmendDialog';
 
 const STATUS_OPTIONS: OrderStatus[] = ['pending', 'preparing', 'ready', 'delivered'];
 
@@ -39,6 +40,8 @@ export function InvoicePage() {
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [askPrint, setAskPrint] = useState(false);
   const [isPrintingKot, setIsPrintingKot] = useState(false);
+  // Amending a saved bill (Phase 3).
+  const [amendOpen, setAmendOpen] = useState(false);
 
   // Payments for this order (feature 3.A).
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -241,6 +244,16 @@ export function InvoicePage() {
             <Button variant="secondary" onClick={() => void savePdf()} isLoading={isSavingPdf}>
               <FileDown aria-hidden className="h-4 w-4" />
               Save PDF
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setAmendOpen(true)}
+              disabled={
+                !data || data.order.status === 'cancelled' || data.order.mergedIntoOrderId !== null
+              }
+            >
+              <PencilLine aria-hidden className="h-4 w-4" />
+              Edit bill
             </Button>
             <Button
               variant="secondary"
@@ -653,6 +666,17 @@ export function InvoicePage() {
           />
         </div>
       </Modal>
+
+      <AmendDialog
+        isOpen={amendOpen}
+        order={data?.order ?? null}
+        onClose={() => setAmendOpen(false)}
+        onAmended={() => {
+          setAmendOpen(false);
+          void invoice.reload();
+          void payments.reload();
+        }}
+      />
     </div>
   );
 }

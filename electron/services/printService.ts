@@ -109,6 +109,11 @@ export function renderInvoiceHtml(data: InvoiceData, paper: PaperSize): string {
           : ''
       }
       ${
+        order.amendmentCount > 0
+          ? `<div><span>Amended</span><span>${order.amendmentCount} time(s)</span></div>`
+          : ''
+      }
+      ${
         order.customerName || order.customerPhone
           ? `<div><span>Customer</span><span>${escapeHtml(
               [order.customerName, order.customerPhone].filter(Boolean).join(' · '),

@@ -38,6 +38,8 @@ const api: RendererApi = {
     markPrinted: (id) => invoke(CHANNELS.orderMarkPrinted, { id }),
     print: (id, paper) => invoke(CHANNELS.orderPrint, { id, paper }),
     savePdf: (id, paper) => invoke(CHANNELS.orderPdf, { id, paper }),
+    amend: (input) => invoke(CHANNELS.orderAmend, input),
+    amendments: (id) => invoke(CHANNELS.orderAmendments, { id }),
   },
 
   payments: {

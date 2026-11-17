@@ -72,6 +72,14 @@ export function OrdersPage() {
         <div>
           <p className="flex items-center gap-2 font-medium">
             {row.orderNo}
+            {row.amendmentCount > 0 && (
+              <span
+                className="rounded-control bg-status-pending/10 px-1.5 py-0.5 text-[11px] font-semibold text-status-pending"
+                title={`Edited ${row.amendmentCount} time(s)`}
+              >
+                edited
+              </span>
+            )}
             {row.tokenNo !== null && (
               <span
                 className="rounded-control bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary"

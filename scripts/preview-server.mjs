@@ -111,6 +111,7 @@ const registry = buildRegistry({
     discounts: discountsService,
     kot: repos.kot,
     tables: repos.tables,
+    payments: repos.payments,
   }),
   staff: staffService,
   vehicles: load('services/vehiclesService.js').createVehiclesService({

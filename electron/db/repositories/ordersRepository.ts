@@ -17,6 +17,7 @@ interface OrderRow {
   type: OrderType;
   status: OrderStatus;
   token_no: number | null;
+  amendment_count: number;
   merged_into_order_id: number | null;
   split_from_order_id: number | null;
   table_id: number | null;
@@ -25,6 +26,7 @@ interface OrderRow {
   customer_address: string;
   waiter_id: number | null;
   delivery_boy_id: number | null;
+  approved_by: number | null;
   waiter_name: string | null;
   delivery_boy_name: string | null;
   subtotal: number;
@@ -51,8 +53,8 @@ interface OrderItemRow {
 }
 
 const ORDER_SELECT = `
-  SELECT o.id, o.order_no, i.invoice_no, o.type, o.status, o.token_no,
-         o.merged_into_order_id, o.split_from_order_id, o.table_id,
+  SELECT o.id, o.order_no, i.invoice_no, o.type, o.status, o.token_no, o.amendment_count,
+         o.merged_into_order_id, o.split_from_order_id, o.table_id, o.approved_by,
          o.customer_name, o.customer_phone, o.customer_address,
          o.waiter_id, o.delivery_boy_id,
          w.name AS waiter_name,
@@ -74,6 +76,7 @@ const toSummary = (row: OrderRow): OrderSummary => ({
   type: row.type,
   status: row.status,
   tokenNo: row.token_no,
+  amendmentCount: row.amendment_count,
   mergedIntoOrderId: row.merged_into_order_id,
   splitFromOrderId: row.split_from_order_id,
   tableId: row.table_id,
@@ -106,6 +109,7 @@ const toDetail = (row: OrderRow, items: OrderItemRecord[]): OrderDetail => ({
   customerAddress: row.customer_address,
   waiterId: row.waiter_id,
   deliveryBoyId: row.delivery_boy_id,
+  approvedBy: row.approved_by,
   taxPercent: row.tax_percent,
   notes: row.notes,
   printedAt: row.printed_at,
@@ -161,6 +165,51 @@ export function createOrdersRepository(db: AppDatabase) {
   const setSplitFrom = db.prepare('UPDATE orders SET split_from_order_id = ? WHERE id = ?');
   const setOrderTotals = db.prepare(
     'UPDATE orders SET subtotal = ?, discount = ?, tax = ?, total = ?, updated_at = ? WHERE id = ?',
+  );
+  /* ------------------------- amendments (migration 013) ------------------------- */
+
+  const updateDetailsRow = db.prepare(`
+    UPDATE orders
+       SET customer_name = @customerName, customer_phone = @customerPhone,
+           customer_address = @customerAddress, waiter_id = @waiterId,
+           notes = @notes, updated_at = @updatedAt
+     WHERE id = @id
+  `);
+  const setTotalsWithApproval = db.prepare(`
+    UPDATE orders
+       SET subtotal = @subtotal, discount = @discount, tax = @tax, total = @total,
+           approved_by = @approvedBy, updated_at = @updatedAt
+     WHERE id = @id
+  `);
+
+  const insertAmendment = db.prepare(`
+    INSERT INTO order_amendments
+      (order_id, version, reason, before_json, after_json, changed_by, created_at)
+    VALUES (@orderId, @version, @reason, @beforeJson, @afterJson, @changedBy, @createdAt)
+  `);
+  const selectAmendments = db.prepare<
+    [number],
+    {
+      version: number;
+      reason: string;
+      before_json: string;
+      after_json: string;
+      changed_by_name: string;
+      created_at: string;
+    }
+  >(`
+    SELECT a.version, a.reason, a.before_json, a.after_json,
+           u.full_name AS changed_by_name, a.created_at
+      FROM order_amendments a
+      JOIN users u ON u.id = a.changed_by
+     WHERE a.order_id = ?
+     ORDER BY a.version
+  `);
+  const nextVersion = db.prepare<[number], { next: number }>(
+    'SELECT COALESCE(MAX(version), 0) + 1 AS next FROM order_amendments WHERE order_id = ?',
+  );
+  const bumpAmendmentCount = db.prepare(
+    'UPDATE orders SET amendment_count = amendment_count + 1 WHERE id = ?',
   );
   const insertCombine = db.prepare(`
     INSERT INTO order_combines (kind, source_id, target_id, item_ids, amount, reason, created_by, created_at)
@@ -380,6 +429,49 @@ export function createOrdersRepository(db: AppDatabase) {
       setOrderTotals.run(subtotal, discount, tax, taxable + tax, toSqlDateTime(), orderId);
     },
 
+    /** Inserts lines onto an existing order. Call inside the order's transaction. */
+    insertItems(
+      orderId: number,
+      items: Array<{
+        itemId: number;
+        name: string;
+        price: number;
+        qty: number;
+        lineTotal: number;
+        notes: string;
+      }>,
+    ): void {
+      for (const item of items) insertOrderItem.run({ orderId, ...item });
+    },
+
+    /** Customer / waiter / notes on an order, leaving money alone. */
+    updateDetails(
+      orderId: number,
+      input: {
+        customerName: string;
+        customerPhone: string;
+        customerAddress: string;
+        waiterId: number | null;
+        notes: string;
+      },
+    ): void {
+      updateDetailsRow.run({ ...input, updatedAt: toSqlDateTime(), id: orderId });
+    },
+
+    /** Writes a recalculated total, and who approved the discount on it. */
+    setTotals(
+      orderId: number,
+      input: {
+        subtotal: number;
+        discount: number;
+        tax: number;
+        total: number;
+        approvedBy: number | null;
+      },
+    ): void {
+      setTotalsWithApproval.run({ ...input, updatedAt: toSqlDateTime(), id: orderId });
+    },
+
     /** Moves every line and the discount policy of `sourceId` onto `targetId`. */
     absorbOrder(sourceId: number, targetId: number): void {
       for (const item of selectItemRows.all(sourceId)) {
@@ -430,6 +522,36 @@ export function createOrdersRepository(db: AppDatabase) {
         itemIds: JSON.stringify(input.itemIds),
         createdAt: toSqlDateTime(),
       });
+    },
+
+    /**
+     * Writes one amendment with full before/after snapshots. Call inside the same
+     * transaction as the line changes, so history can never disagree with the data.
+     */
+    recordAmendment(input: {
+      orderId: number;
+      reason: string;
+      beforeJson: string;
+      afterJson: string;
+      changedBy: number;
+    }): number {
+      const version = nextVersion.get(input.orderId)?.next ?? 1;
+
+      insertAmendment.run({ ...input, version, createdAt: toSqlDateTime() });
+      bumpAmendmentCount.run(input.orderId);
+
+      return version;
+    },
+
+    amendmentsFor(orderId: number) {
+      return selectAmendments.all(orderId).map((row) => ({
+        version: row.version,
+        reason: row.reason,
+        before: JSON.parse(row.before_json) as unknown,
+        after: JSON.parse(row.after_json) as unknown,
+        changedByName: row.changed_by_name,
+        createdAt: row.created_at,
+      }));
     },
 
     updateStatus(id: number, status: OrderStatus): void {

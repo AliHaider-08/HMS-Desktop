@@ -8,6 +8,7 @@ import type {
 import type { DiscountsRepository } from '../db/repositories/discountsRepository';
 import type { UserRepository } from '../db/repositories/userRepository';
 import { AppError } from '../utils/errors';
+import { formatAmount } from '../utils/money';
 import { verifyPassword } from '../utils/password';
 import { roleHasCapability } from './permissions';
 import { logInfo } from './logger';
@@ -177,7 +178,7 @@ export function createDiscountsService(deps: {
             `A ${rule.role} cannot give more than ${(rule.maxPercentX100 / 100).toFixed(2)}%`,
           );
         } else if (rule.maxAmount !== null && amount > rule.maxAmount) {
-          errors.push(`The maximum discount is ${rule.maxAmount} paisa`);
+          errors.push(`The maximum discount is ${formatAmount(rule.maxAmount)}`);
         }
 
         // 100% means "every discount needs approval" for cashiers and managers;
