@@ -7,7 +7,8 @@
 Fast Food Management Desktop App (Electron + React + SQLite)
 
 ## Current Status
-- Current phase: **All six phases implemented (code complete, awaiting manual testing on Windows)**
+- Current phase: **Roadmap Phase 1 (release blockers) complete — PR open, CI green. Phase 2 not started.**
+- Original six phases are code complete and merged; the roadmap below hardens them before new features.
 - File currently being worked on: `docs/memory.md` (last code file: `src/pages/Reports/ReportsPage.tsx`)
 - App runs offline; data file: `%APPDATA%\gul-khan-fast-food\data\fastfood.db`
 - Logs: `%APPDATA%\gul-khan-fast-food\logs\app.log`
@@ -35,6 +36,18 @@ Fast Food Management Desktop App (Electron + React + SQLite)
 - [x] Release polish — app icon (`build/icon.ico` + `build/icon.png`, wired into NSIS and the
       window), `docs/user-guide.md` for owner/cashier, log rotation, installer config validated by
       electron-builder's own schema in a test
+- [x] **Roadmap Phase 1 — release blockers** (no migration)
+  - 1.A restore now validates, closes, copies, clears `-wal`/`-shm`, shows a dialog and relaunches
+    (`app.relaunch()` + `app.exit(0)`) instead of leaving repositories on a dead handle
+  - 1.B `validateBackupFile()` runs BEFORE the live DB is touched: read-only open,
+    `PRAGMA integrity_check`, requires `schema_migrations` + `orders`, refuses a newer schema version
+  - 1.C `orders:status` requires `orders:cancel` for `cancelled`, so a cashier cannot bypass the
+    hidden button
+  - 1.D sequence allocation moved inside the insert transaction (`ordersRepository.transaction`)
+  - 1.E `monthEnd()` in `main.ts` + harness; `monthEndIso()` in the renderer (salary CSV had the same
+    `${month}-31` bug); duplicate `markPrinted` removed from the print/pdf handlers; over-subtotal
+    discount is a hard error
+  - 1.F `.github/workflows/ci.yml` (Node 22, npm cache, four gates) — green
 
 PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all checks green.
 
@@ -48,7 +61,7 @@ PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all
 
 ## Verification (headless)
 `npm run verify` runs typecheck + lint + all phase tests.
-Last result: **90 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
+Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
 
 | Suite | Checks |
 | --- | --- |
@@ -58,6 +71,7 @@ Last result: **90 checks passed, 0 failed** (`npm run test:all`), stable across 
 | Phase 4 (`scripts/test-phase4.mjs`) | 11 |
 | Phase 5 (`scripts/test-phase5.mjs`) | 13 |
 | Phase 6 (`scripts/test-phase6.mjs`) | 13 |
+| Phase 7 (`scripts/test-phase7.mjs`) | 17 |
 
 ## Decisions Made
 - Electron 45, React 19, Vite 7, TypeScript 5.9, Tailwind 3, Zustand 5, React Router 7 (hash
@@ -93,6 +107,14 @@ Last result: **90 checks passed, 0 failed** (`npm run test:all`), stable across 
 - `scripts/` and `docs/phase-1-test-checklist.md` are not in architecture.md; no app code lives
   there. `electron/ipc/registry.ts` was added next to the documented per-module `.ipc.ts` files.
 
+## Roadmap status (post-merge spec)
+- Phase 1 (release blockers): **done**, PR open, CI green, no migration used.
+- Phase 2 (payments/udhaar, shifts + X/Z report, discount rules, KOT): **not started**. Will use
+  migrations 008+ in the order payments → shifts → discounts → KOT.
+- Phase 3 (tables/merge/split, order amendments, hardening: logo out of settings, silent print,
+  sandbox, persistent lockout, keyset pagination): not started.
+- Phase 4 (variants/combos, inventory/recipes, Urdu UI): not started.
+
 ## Known Issues / Bugs
 - **Not launched on Windows yet.** This sandbox has no display and cannot download the Electron
   binary, so the desktop window, printing, PDF saving, native file dialogs and the NSIS installer
@@ -101,6 +123,9 @@ Last result: **90 checks passed, 0 failed** (`npm run test:all`), stable across 
   installed printer driver — verify on the real receipt printer.
 - No Urdu language support yet (open question from the PRD). Font would be Noto Nastaliq Urdu.
 - Expense/salary history is per month; no multi-year archive screen (data is still stored).
+- Restoring a backup **relaunches the app**; this is intentional (repositories cannot be swapped
+  safely). The relaunch itself is not unit-tested — it needs a live Electron app.
+- Phase 2+ features listed in the roadmap are not in this build yet.
 - ~~Log rotation is not implemented~~ — **fixed**: `app.log` rotates to `app.log.1` at 5 MB and only
   one old file is kept (`electron/services/logger.ts`, covered by a Phase 6 test).
 
