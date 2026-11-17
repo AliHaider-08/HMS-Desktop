@@ -136,6 +136,13 @@ export const orderFilterSchema = z.object({
   fromDate: z.string(message).max(10).default(''),
   toDate: z.string(message).max(10).default(''),
   limit: z.number(message).int().min(1).max(500).default(100),
+  after: z
+    .object({
+      createdAt: z.string(message).trim().min(1),
+      id: z.number(message).int().positive(),
+    })
+    .nullable()
+    .default(null),
 });
 
 export const orderStatusUpdateSchema = z.object({
@@ -268,6 +275,7 @@ export const shopSettingsSchema = z.object({
     .max(100, 'Tax cannot exceed 100%'),
   receiptWidth: z.enum(['80mm', 'a4']).default('80mm'),
   backupOnClose: z.boolean(message).default(true),
+  printerSilent: z.boolean(message).default(true),
 });
 
 /* -------------------------------- Users -------------------------------- */

@@ -73,6 +73,7 @@ const printStub = {
   printKot: async () => {
     throw new Error('Printing is not available in the browser preview');
   },
+  silentPrinting: () => false,
   renderHtml: load('services/printService.js').renderInvoiceHtml,
   renderKotHtml: load('services/printService.js').renderKotHtml,
 };

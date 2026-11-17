@@ -385,6 +385,12 @@ export interface OrderFilter {
   fromDate: string;
   toDate: string;
   limit: number;
+  /**
+   * Keyset cursor: return only orders older than this one. Offsetting by page
+   * number gets slower the deeper you scroll and can repeat a row when a new order
+   * is created between pages, so the list asks for "after this" instead.
+   */
+  after?: { createdAt: string; id: number } | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -740,6 +746,8 @@ export interface ShopSettings {
   taxPercent: number;
   receiptWidth: '80mm' | 'a4';
   backupOnClose: boolean;
+  /** Print without the system dialog. Off means the cashier picks a printer each time. */
+  printerSilent: boolean;
 }
 
 export interface AppUser {

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
-import { copyFileSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { closeDatabase, getDatabase, openDatabase } from './db/connection';
 import { runMigrations } from './db/migrate';
 import { createUserRepository } from './db/repositories/userRepository';
@@ -17,6 +17,7 @@ import { seedDefaultAdmin } from './db/seed';
 import { seedDemoData } from './db/seedDemo';
 import { createAuthService } from './services/authService';
 import { createSettingsService } from './services/settingsService';
+import { createLogoService } from './services/logoService';
 import { createUserService } from './services/userService';
 import { createCatalogService } from './services/catalogService';
 import { createOrdersService } from './services/ordersService';
@@ -46,6 +47,7 @@ let mainWindow: BrowserWindow | null = null;
 let authService: AuthService | null = null;
 let registry: ReturnType<typeof buildRegistry> | null = null;
 let backupServiceInstance: ReturnType<typeof createBackupService> | null = null;
+let logoServiceInstance: ReturnType<typeof createLogoService> | null = null;
 
 function databaseFile(): string {
   return path.join(app.getPath('userData'), 'data', 'fastfood.db');
@@ -93,7 +95,17 @@ async function bootstrapServices(): Promise<void> {
 
   // Repositories prepare statements, so they are created after migrations.
   const users = createUserRepository(db);
-  const settingsRepo = createSettingsRepository(db);
+  const logoService = createLogoService(() => path.join(app.getPath('userData'), 'branding'));
+  logoServiceInstance = logoService;
+
+  const settingsRepo = createSettingsRepository(
+    db,
+    // Reading resolves a stored file name back into a printable data URL; writing
+    // moves any inline data URL into the branding folder. The settings row keeps a
+    // short file name, so it cannot bloat the database or the backups.
+    (stored) => logoService.resolve(stored),
+    (dataUrl) => logoService.adoptLegacyDataUrl(dataUrl),
+  );
   const catalogRepo = createCatalogRepository(db);
   const ordersRepo = createOrdersRepository(db);
   const staffRepo = createStaffRepository(db);
@@ -197,6 +209,8 @@ async function bootstrapServices(): Promise<void> {
     markPrinted: (orderId) => {
       ordersRepo.markInvoicePrinted(orderId);
     },
+    // Read fresh on every print so a Settings change takes effect immediately.
+    silentPrinting: () => settingsRepo.readShopSettings().printerSilent,
   });
 
   const reportsService = createReportsService({
@@ -289,12 +303,25 @@ function registerIpcHandlers(): void {
 
     if (result.canceled || !result.filePaths[0]) return { ok: true, data: null };
 
-    const filePath = result.filePaths[0];
-    const extension = path.extname(filePath).slice(1).toLowerCase();
-    const mime = extension === 'jpg' ? 'jpeg' : extension;
-    const base64 = readFileSync(filePath).toString('base64');
+    const logo = logoServiceInstance;
+    if (!logo) {
+      return { ok: false, error: { code: 'INTERNAL_ERROR', message: 'Services are not ready' } };
+    }
 
-    return { ok: true, data: `data:image/${mime};base64,${base64}` };
+    try {
+      // Copy the image into the shop's own folder; settings keeps only the name.
+      const stored = logo.save(result.filePaths[0]);
+      return { ok: true, data: logo.resolve(stored) };
+    } catch (error) {
+      const appError = error as { code?: string; message?: string };
+      return {
+        ok: false,
+        error: {
+          code: appError.code === 'VALIDATION_ERROR' ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR',
+          message: appError.message ?? 'The logo could not be saved',
+        },
+      };
+    }
   });
 }
 
@@ -313,7 +340,10 @@ function createMainWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       // The preload imports the shared channel constants, which needs a real require.
-      sandbox: false,
+      // The renderer is untrusted input in this app: it displays data, it never
+      // runs code from the database. Sandboxing it is free here because the preload
+      // only uses contextBridge + ipcRenderer (no Node APIs).
+      sandbox: true,
     },
   });
 
