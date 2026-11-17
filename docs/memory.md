@@ -109,8 +109,8 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 
 ## Roadmap status (post-merge spec)
 - Phase 1 (release blockers): **done**, PR open, CI green, no migration used.
-- Phase 2: payments/udhaar (008), shifts + X/Z report (009) and discount rules (010) **done**.
-  KOT/token (011) remains — next, and the last item of Phase 2.
+- Phase 2: **done** — payments/udhaar (008), shifts + X/Z report (009), discount rules (010),
+  kitchen tickets + tokens (011).
 - Phase 3 (tables/merge/split, order amendments, hardening: logo out of settings, silent print,
   sandbox, persistent lockout, keyset pagination): not started.
 - Phase 4 (variants/combos, inventory/recipes, Urdu UI): not started.
@@ -125,7 +125,8 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 - Expense/salary history is per month; no multi-year archive screen (data is still stored).
 - Restoring a backup **relaunches the app**; this is intentional (repositories cannot be swapped
   safely). The relaunch itself is not unit-tested — it needs a live Electron app.
-- KOT/token printing and the Phase 3–4 features are not in this build yet.
+- Phase 3–4 features are not in this build yet (tables/merge/split, amendments, hardening,
+  variants/combos, inventory, Urdu).
 - ~~Log rotation is not implemented~~ — **fixed**: `app.log` rotates to `app.log.1` at 5 MB and only
   one old file is kept (`electron/services/logger.ts`, covered by a Phase 6 test).
 
@@ -163,6 +164,25 @@ Decisions that are easy to undo by accident:
 
 Editing rules is admin-only (`roles: ['admin']`); promo codes need `discount:write` (managers).
 
+## Kitchen tickets and tokens (migration 011)
+- **Token** = the number called out to the customer. Allocated from `token_counters` per shop
+  day, **inside the order transaction**, and only for `dine_in` / `takeaway`. Delivery orders get
+  `token_no = NULL`: the rider has an address, and a token would only confuse the counter queue.
+- **A cancelled order does not release its token.** A number that has been shouted across the
+  shop cannot be re-issued without two customers holding the same one. The per-day counter is
+  monotonic by design; do not "fix" the gap.
+- **KOT** (`kotRepository.ticketFor` → `KOT`) deliberately has **no price fields at all**, so
+  money cannot leak into the kitchen by accident. `scripts/test-phase11.mjs` asserts the shape,
+  not just the template. The slip is 80mm, large-type, and a reprint is stamped
+  *"Reprint — do not cook twice"*.
+- `kot_prints` records each print with the user and the `order_item` ids (JSON, so a later
+  "print only the new items" needs no migration). **Only a print that reached the printer is
+  recorded**, which keeps the reprint marker honest; the preview throws on print for that reason.
+- A cancelled order is refused rather than sent to the kitchen. Everyone who takes an order holds
+  `kot:print`; reading a ticket needs only `orders:write`.
+- The till prints the slip right after saving. A print failure is reported but never blocks the
+  order — it is already saved and paid, and the invoice screen can reprint.
+
 ## Last Updated
 - Date: 2026-11-16
-- By: Arena Agent (Phase 2 — 3.C discounts)
+- By: Arena Agent (Phase 2 — 3.D kitchen tickets, Phase 2 complete)
