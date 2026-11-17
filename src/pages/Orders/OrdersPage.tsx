@@ -48,16 +48,59 @@ export function OrdersPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<OrderSummary | null>(null);
 
+  /**
+   * Keyset paging: the first page comes from useAsync, and "load more" appends the
+   * next slice. Offsetting by page number would repeat or skip rows whenever a new
+   * order arrives while the cashier is scrolling.
+   */
+  const PAGE_SIZE = 50;
+  const [olderOrders, setOlderOrders] = useState<OrderSummary[]>([]);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const orders = useAsync(
-    async () => unwrap(await getApi().orders.list(filter)),
+    async () => unwrap(await getApi().orders.list({ ...filter, limit: PAGE_SIZE })),
     [filter.search, filter.status, filter.type, filter.fromDate, filter.toDate],
   );
+
+  /**
+   * Changing a filter discards accumulated pages. Done in the setter rather than an
+   * effect, so a page of stale rows is never rendered between the two renders.
+   */
+  const changeFilter = (patch: Partial<OrderFilter>) => {
+    setOlderOrders([]);
+    setFilter((current) => ({ ...current, ...patch }));
+  };
+
+  const visibleOrders = [...(orders.data ?? []), ...olderOrders];
+  const lastOrder = visibleOrders[visibleOrders.length - 1];
+  // A short page is the end of the list: no point asking for more.
+  const hasMore = (orders.data ?? []).length === PAGE_SIZE;
+
+  const loadMore = async () => {
+    if (!lastOrder || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const next = unwrap(
+        await getApi().orders.list({
+          ...filter,
+          limit: PAGE_SIZE,
+          after: { createdAt: lastOrder.createdAt, id: lastOrder.id },
+        }),
+      );
+      setOlderOrders((current) => [...current, ...next]);
+    } catch (error) {
+      toast.error(errorMessage(error, 'Older orders could not be loaded'));
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
 
   const cancelOrder = async () => {
     if (!cancelTarget) return;
     try {
       unwrap(await getApi().orders.cancel(cancelTarget.id));
       toast.success(`Order ${cancelTarget.orderNo} cancelled`);
+      setOlderOrders([]);
       await orders.reload();
     } catch (error) {
       toast.error(errorMessage(error));
@@ -217,7 +260,7 @@ export function OrdersPage() {
             />
             <input
               value={filter.search}
-              onChange={(event) => setFilter({ ...filter, search: event.target.value })}
+              onChange={(event) => changeFilter({ search: event.target.value })}
               placeholder="Search order no., invoice no., customer or phone"
               aria-label="Search orders"
               className="h-control w-full rounded-control border border-border bg-surface pl-9 pr-3 text-body focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
@@ -229,7 +272,7 @@ export function OrdersPage() {
               <button
                 key={status}
                 type="button"
-                onClick={() => setFilter({ ...filter, status })}
+                onClick={() => changeFilter({ status })}
                 className={`h-8 rounded-full border px-3 text-caption font-medium ${
                   filter.status === status
                     ? 'border-primary bg-primary text-white'
@@ -254,7 +297,7 @@ export function OrdersPage() {
               <select
                 value={filter.type}
                 onChange={(event) =>
-                  setFilter({ ...filter, type: event.target.value as OrderType | 'all' })
+                  changeFilter({ type: event.target.value as OrderType | 'all' })
                 }
                 className="h-control rounded-control border border-border bg-surface px-3 text-body"
               >
@@ -271,7 +314,7 @@ export function OrdersPage() {
               <input
                 type="date"
                 value={filter.fromDate}
-                onChange={(event) => setFilter({ ...filter, fromDate: event.target.value })}
+                onChange={(event) => changeFilter({ fromDate: event.target.value })}
                 className="h-control rounded-control border border-border bg-surface px-3 text-body"
               />
             </label>
@@ -281,7 +324,7 @@ export function OrdersPage() {
               <input
                 type="date"
                 value={filter.toDate}
-                onChange={(event) => setFilter({ ...filter, toDate: event.target.value })}
+                onChange={(event) => changeFilter({ toDate: event.target.value })}
                 className="h-control rounded-control border border-border bg-surface px-3 text-body"
               />
             </label>
@@ -289,13 +332,12 @@ export function OrdersPage() {
             <Button
               variant="ghost"
               onClick={() =>
-                setFilter({
+                changeFilter({
                   search: '',
                   status: 'all',
                   type: 'all',
                   fromDate: '',
                   toDate: '',
-                  limit: 200,
                 })
               }
             >
@@ -304,13 +346,7 @@ export function OrdersPage() {
 
             <Button
               variant="secondary"
-              onClick={() =>
-                setFilter({
-                  ...filter,
-                  fromDate: monthStartIso(),
-                  toDate: todayIso(),
-                })
-              }
+              onClick={() => changeFilter({ fromDate: monthStartIso(), toDate: todayIso() })}
             >
               This month
             </Button>
@@ -320,12 +356,20 @@ export function OrdersPage() {
 
       <Table
         columns={columns}
-        rows={orders.data ?? []}
+        rows={visibleOrders}
         rowKey={(row) => row.id}
         isLoading={orders.isLoading}
         emptyMessage="No orders found"
         emptyHint="Change the filters or take a new order."
       />
+
+      {hasMore && (
+        <div className="mt-3 flex justify-center">
+          <Button variant="secondary" isLoading={isLoadingMore} onClick={() => void loadMore()}>
+            Load older orders
+          </Button>
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={cancelTarget !== null}

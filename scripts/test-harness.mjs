@@ -26,9 +26,19 @@ function highestMigrationVersion() {
     .reduce((highest, version) => Math.max(highest, version), 0);
 }
 
-export function createHarness({ withDemoData = true } = {}) {
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gulkhan-test-'));
-  const dbFile = path.join(tempDir, 'test.db');
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.withDemoData] Seed the demo menu/users/orders.
+ * @param {string} [options.databaseFile] Reopen an existing database instead of a fresh
+ *   one. Used to prove that state survives a restart — the same thing relaunching the
+ *   app does, since the harness holds the only handle on the file.
+ * @param {boolean} [options.seed] Seed the default admin. False when reopening an
+ *   existing database, which already has one.
+ */
+export function createHarness({ withDemoData = true, databaseFile = null, seed = true } = {}) {
+  const ownedTempDir = databaseFile ? null : mkdtempSync(path.join(os.tmpdir(), 'gulkhan-test-'));
+  const tempDir = databaseFile ? path.dirname(databaseFile) : ownedTempDir;
+  const dbFile = databaseFile ?? path.join(tempDir, 'test.db');
 
   const { openDatabase, closeDatabase, getDatabase } = load('db/connection.js');
   const { runMigrations } = load('db/migrate.js');
@@ -127,6 +137,7 @@ export function createHarness({ withDemoData = true } = {}) {
     savePdf: async () => null,
     printShiftReport: async () => true,
     printKot: async () => true,
+    silentPrinting: () => false,
     renderHtml: renderInvoiceHtml,
     renderKotHtml: load('services/printService.js').renderKotHtml,
   };
@@ -219,7 +230,7 @@ export function createHarness({ withDemoData = true } = {}) {
   }
 
   async function setup() {
-    await seedDefaultAdmin(repositories.users);
+    if (seed) await seedDefaultAdmin(repositories.users);
     if (withDemoData) {
       await seedDemoData({
         users: repositories.users,
@@ -234,7 +245,8 @@ export function createHarness({ withDemoData = true } = {}) {
 
   function cleanup() {
     closeDatabase();
-    rmSync(tempDir, { recursive: true, force: true });
+    // A harness that opened someone else's file must not delete it.
+    if (ownedTempDir) rmSync(ownedTempDir, { recursive: true, force: true });
   }
 
   return {

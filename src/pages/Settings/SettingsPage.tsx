@@ -153,6 +153,16 @@ export function SettingsPage() {
                 <input type="checkbox" className="h-4 w-4" {...register('backupOnClose')} />
                 Back up the database when the app closes
               </label>
+              <label className="flex items-start gap-2 text-body text-text-primary">
+                <input type="checkbox" className="mt-0.5 h-4 w-4" {...register('printerSilent')} />
+                <span>
+                  Print silently
+                  <span className="block text-caption text-text-secondary">
+                    Send receipts straight to the default printer. Turn this off to choose a
+                    printer for each slip.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <div className="mt-6 border-t border-border pt-4">

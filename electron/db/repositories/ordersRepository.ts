@@ -386,6 +386,14 @@ export function createOrdersRepository(db: AppDatabase) {
         params.push(filter.toDate);
       }
 
+      // Keyset paging. The tuple comparison is spelled out because SQLite does not
+      // support `(a, b) < (?, ?)` before 3.15 — and spelling it out also makes the
+      // "same timestamp, lower id" tie-break obvious.
+      if (filter.after) {
+        conditions.push('(o.created_at < ? OR (o.created_at = ? AND o.id < ?))');
+        params.push(filter.after.createdAt, filter.after.createdAt, filter.after.id);
+      }
+
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
       const sql = `${ORDER_SELECT} ${where} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`;
       params.push(filter.limit);

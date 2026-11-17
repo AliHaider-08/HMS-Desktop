@@ -111,21 +111,21 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 - Phase 1 (release blockers): **done**, PR open, CI green, no migration used.
 - Phase 2: **done** — payments/udhaar (008), shifts + X/Z report (009), discount rules (010),
   kitchen tickets + tokens (011).
-- Phase 3: tables/merge/split (012) and order amendments (013) **done**. Remaining: the hardening
-  block (logo out of settings, silent print, sandbox, persistent lockout, keyset pagination).
+- Phase 3: tables/merge/split (012), order amendments (013) and the **hardening block (014) done** —
+  the phase is complete.
 - Phase 4 (variants/combos, inventory/recipes, Urdu UI): not started.
 
 ## Known Issues / Bugs
 - **Not launched on Windows yet.** This sandbox has no display and cannot download the Electron
   binary, so the desktop window, printing, PDF saving, native file dialogs and the NSIS installer
   still need a manual test on the shop PC (`docs/phase-1-test-checklist.md` plus the phase tests).
-- Printing uses the system print dialog (`webContents.print`); thermal 80mm output depends on the
-  installed printer driver — verify on the real receipt printer.
+- Thermal 80mm output depends on the installed printer driver — verify on the real receipt printer.
+  Silent printing is now the default; if the dialog is needed it can be turned off in Settings.
 - No Urdu language support yet (open question from the PRD). Font would be Noto Nastaliq Urdu.
 - Expense/salary history is per month; no multi-year archive screen (data is still stored).
 - Restoring a backup **relaunches the app**; this is intentional (repositories cannot be swapped
   safely). The relaunch itself is not unit-tested — it needs a live Electron app.
-- Phase 3–4 features still missing: hardening, variants/combos, inventory, Urdu.
+- Phase 4 features still missing: variants/combos, inventory/recipes, Urdu UI.
 - ~~Log rotation is not implemented~~ — **fixed**: `app.log` rotates to `app.log.1` at 5 MB and only
   one old file is kept (`electron/services/logger.ts`, covered by a Phase 6 test).
 
@@ -230,6 +230,42 @@ Other decisions:
 - Channel names are singular: `order:amend` / `order:amendments` (not `orders:...`). Two test
   runs were wasted on that; the registry key list is the quickest way to check.
 
+## Hardening (migration 014)
+
+The five things that were fine in a demo and wrong in a shop. Each has a test in
+`scripts/test-phase14.mjs` (17 checks), and each test was mutation-checked: revert the fix in
+`dist-electron` and the test goes red.
+
+- **Login lockout is persisted, not in memory.** `users.failed_attempts` + `users.locked_until`
+  (partial index `idx_users_locked_until`). Five wrong passwords set the counter to 5 and stamp a
+  5-minute lock; the row survives a restart, so quitting the app no longer resets the count. An
+  *expired* lock lets the next attempt through and restarts the count at 1 instead of re-locking on
+  one more typo. A good password clears both columns. An unknown username has no row to count
+  against, but still pays the 200 ms delay so 'does this user exist?' cannot be timed.
+  **The repository must *set* the absolute count**, never `failed_attempts + 1` — the service
+  recomputes its base on every call, so an incrementing repository never reaches the threshold.
+- **Silent printing.** `settings.printer_silent` (default on). `printService` reads it from
+  `deps.silentPrinting()` at print time, so changing it in Settings takes effect without a restart.
+  All three slips (invoice, X/Z report, KOT) share one `printOptions()` builder — previously the
+  `silent: false` literal was copied three times and would have drifted.
+- **Renderer sandbox.** `sandbox: true` alongside `contextIsolation: true` /
+  `nodeIntegration: false`. This only works because the preload is now **bundled** into a single
+  file by `scripts/copy-electron-assets.mjs`: under sandbox a preload gets a stub `require()`, so
+  the old `require('../src/types/api')` would have thrown and `window.api` would never have existed
+  — a blank, unclickable window. The copy script fails the build if a relative require survives.
+- **Logo out of the settings blob.** It used to be a base64 data URL inside one settings value, up
+  to 2 MB read out of SQLite on every invoice and duplicated into every backup. It is now a file in
+  `userData/branding/` and the settings row holds a 13-character file name. `logoService` resolves a
+  file name back to a data URL on read (what `<img src>` and the print window need) and refuses
+  anything over 512 KB with a readable message. A logo stored inline by an older build is adopted
+  into a file the next time settings are saved, so no database is stranded.
+- **Keyset pagination.** `orders:list` takes `after: { createdAt, id }` and pages with
+  `(o.created_at < ? OR (o.created_at = ? AND o.id < ?))` — spelled out because SQLite before 3.15
+  cannot compare a row tuple. Offset paging got slower the deeper the cashier scrolled and could
+  repeat a row when a new order arrived mid-scroll. `OrdersPage` loads 50 at a time with a
+  **Load older orders** button and discards accumulated pages when a filter changes (in the filter
+  setter, not an effect — the React compiler rejects `setState` inside `useEffect`).
+
 ## Last Updated
 - Date: 2026-11-16
-- By: Arena Agent (Phase 3 — order amendments)
+- By: Arena Agent (Phase 3 — hardening)

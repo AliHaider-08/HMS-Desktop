@@ -391,6 +391,11 @@ export interface PrintServiceDeps {
   pdfDirectory: () => string;
   /** Record that the invoice was printed (sets invoices.printed_at). */
   markPrinted: (orderId: number) => void;
+  /**
+   * Whether to print without the system dialog. Read at print time, not at startup,
+   * so the owner can change it in Settings and see the effect immediately.
+   */
+  silentPrinting: () => boolean;
 }
 
 export function createPrintService(deps: PrintServiceDeps) {
@@ -417,6 +422,21 @@ export function createPrintService(deps: PrintServiceDeps) {
     }
   }
 
+  /**
+   * Print options shared by every slip. `silent` comes from the shop setting: a
+   * busy counter should not see the system dialog on every sale, but a shop that
+   * changes printers likes having it. When silent, a failure is reported through
+   * the boolean the caller already handles — the cashier never sees a dialog.
+   */
+  function printOptions(paper: PaperSize) {
+    return {
+      silent: deps.silentPrinting(),
+      printBackground: true,
+      margins: { marginType: 'none' as const },
+      pageSize: paper === '80mm' ? { width: 80_000, height: 297_000 } : ('A4' as const),
+    };
+  }
+
   async function withInvoiceWindow<T>(
     data: InvoiceData,
     paper: PaperSize,
@@ -440,12 +460,7 @@ export function createPrintService(deps: PrintServiceDeps) {
         return await withInvoiceWindow(data, paper, async (printWindow) => {
           const printed = await new Promise<boolean>((resolve) => {
             printWindow.webContents.print(
-              {
-                silent: false,
-                printBackground: true,
-                margins: { marginType: 'none' },
-                pageSize: paper === '80mm' ? { width: 80_000, height: 297_000 } : 'A4',
-              },
+              printOptions(paper),
               (success) => resolve(success),
             );
           });
@@ -469,12 +484,7 @@ export function createPrintService(deps: PrintServiceDeps) {
         return await withHtmlWindow(renderKotHtml(kot, shopName), '80mm', async (printWindow) => {
           const printed = await new Promise<boolean>((resolve) => {
             printWindow.webContents.print(
-              {
-                silent: false,
-                printBackground: true,
-                margins: { marginType: 'none' },
-                pageSize: { width: 80_000, height: 297_000 },
-              },
+              printOptions('80mm'),
               (success) => resolve(success),
             );
           });
@@ -492,12 +502,7 @@ export function createPrintService(deps: PrintServiceDeps) {
         return await withReportWindow(data, paper, async (printWindow) => {
           const printed = await new Promise<boolean>((resolve) => {
             printWindow.webContents.print(
-              {
-                silent: false,
-                printBackground: true,
-                margins: { marginType: 'none' },
-                pageSize: paper === '80mm' ? { width: 80_000, height: 297_000 } : 'A4',
-              },
+              printOptions(paper),
               (success) => resolve(success),
             );
           });
