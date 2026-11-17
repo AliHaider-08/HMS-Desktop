@@ -374,3 +374,27 @@ export const ledgerQuerySchema = z.object({ customerId: idField });
 
 /** CSV export names that map to the udhaar page. */
 export const UDHAAR_EXPORT = 'udhaar' as const;
+
+/* ------------------------------------------------------------------ *
+ * Shifts / day close (Phase 2, feature 3.B)
+ * ------------------------------------------------------------------ */
+
+export const cashMovementSchema = z.object({
+  kind: z.enum(['cash_in', 'cash_out', 'refund', 'expense']),
+  amount: paisaField.refine((value) => value > 0, { message: 'Amount must be more than zero' }),
+  reason: z.string(message).trim().min(3, 'Give a reason for this cash movement').max(200),
+});
+
+export const shiftOpenSchema = z.object({ openingCash: paisaField });
+
+export const shiftCloseSchema = z.object({
+  countedCash: paisaField,
+  notes: optionalText(300, 'Notes'),
+});
+
+export const shiftIdSchema = z.object({ shiftId: idField });
+export const shiftReportSchema = z.object({ shiftId: idField.optional() });
+export const shiftListSchema = z.object({
+  limit: z.number(message).int().min(1).max(200).default(20),
+});
+export const shiftPrintSchema = z.object({ shiftId: idField, paper: z.enum(['80mm', 'a4']) });

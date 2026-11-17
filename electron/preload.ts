@@ -49,6 +49,16 @@ const api: RendererApi = {
     settleUdhaar: (input) => invoke(CHANNELS.udhaarSettle, input),
   },
 
+  shifts: {
+    current: () => invoke(CHANNELS.shiftCurrent, {}),
+    open: (openingCash) => invoke(CHANNELS.shiftOpen, { openingCash }),
+    close: (input) => invoke(CHANNELS.shiftClose, input),
+    report: (shiftId) => invoke(CHANNELS.shiftReport, shiftId === undefined ? {} : { shiftId }),
+    list: (limit = 20) => invoke(CHANNELS.shiftList, { limit }),
+    addCashMovement: (input) => invoke(CHANNELS.shiftCashMovement, input),
+    print: (shiftId, paper) => invoke(CHANNELS.shiftPrint, { shiftId, paper }),
+  },
+
   staff: {
     listWaiters: () => invoke(CHANNELS.waiters),
     saveWaiter: (input) => invoke(CHANNELS.waiterSave, input),

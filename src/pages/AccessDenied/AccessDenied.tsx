@@ -13,6 +13,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   orders: 'Orders',
   menu: 'Menu',
   udhaar: 'Udhaar',
+  shifts: 'Day close',
   staff: 'Staff',
   vehicles: 'Vehicles',
   reports: 'Reports',

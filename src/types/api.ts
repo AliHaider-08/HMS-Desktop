@@ -19,7 +19,9 @@ export type PageKey =
   | 'users'
   | 'settings'
   // Phase 2 (3.A) — customer credit ("udhaar") ledger.
-  | 'udhaar';
+  | 'udhaar'
+  // Phase 2 (3.B) — day close.
+  | 'shifts';
 
 /** Fine grained write permissions, so a cashier can open the menu but not edit it. */
 export type Capability =
@@ -36,7 +38,10 @@ export type Capability =
   | 'payments:write'
   | 'payments:void'
   | 'udhaar:read'
-  | 'udhaar:settle';
+  | 'udhaar:settle'
+  // Phase 2 (3.B) — day close / shift.
+  | 'shifts:read'
+  | 'shifts:write';
 
 export interface RolePermissions {
   role: UserRole;
@@ -153,6 +158,66 @@ export interface AddPaymentInput {
   tendered: number | null;
   changeDue: number | null;
   reference: string;
+}
+
+export type ShiftStatus = 'open' | 'closed';
+export type CashMovementKind = 'sale' | 'cash_in' | 'cash_out' | 'refund' | 'expense';
+
+export interface Shift {
+  id: number;
+  terminal: string;
+  openedBy: number;
+  openedByName: string;
+  openedAt: string;
+  closedBy: number | null;
+  closedByName: string | null;
+  closedAt: string | null;
+  openingCash: number;
+  expectedCash: number | null;
+  countedCash: number | null;
+  difference: number | null;
+  status: ShiftStatus;
+  notes: string;
+}
+
+export interface CashMovement {
+  id: number;
+  shiftId: number;
+  kind: CashMovementKind;
+  method: PaymentMethod;
+  amount: number;
+  reason: string;
+  refOrderId: number | null;
+  createdBy: number;
+  createdByName: string;
+  createdAt: string;
+}
+
+/** The X/Z report: everything the day-close screen and the printed slip need. */
+export interface ShiftReport {
+  shift: Shift;
+  salesByMethod: CollectionByMethod[];
+  totalSales: number;
+  orderCount: number;
+  cashSales: number;
+  cashIn: number;
+  cashOut: number;
+  refunds: number;
+  expenses: number;
+  discountTotal: number;
+  cancelledCount: number;
+  cancelledValue: number;
+  topItems: TopItemRow[];
+  /** Cash-in/out/refund/expense rows for this shift, newest last. */
+  movements: CashMovement[];
+  /**
+   * What should be in the drawer right now. For an open shift this is computed
+   * live (that is the point of an X report); for a closed one it is the stored
+   * figure from the close.
+   */
+  expectedCash: number;
+  /** Null for an X report (shift still open). */
+  variance: number | null;
 }
 
 export interface CollectionByMethod {
@@ -580,6 +645,20 @@ export interface PaymentsApi {
   }): Promise<ApiResult<CustomerLedgerEntry>>;
 }
 
+export interface ShiftsApi {
+  current(): Promise<ApiResult<Shift | null>>;
+  open(openingCash: number): Promise<ApiResult<Shift>>;
+  close(input: { countedCash: number; notes: string }): Promise<ApiResult<ShiftReport>>;
+  report(shiftId?: number): Promise<ApiResult<ShiftReport>>;
+  list(limit?: number): Promise<ApiResult<Shift[]>>;
+  addCashMovement(input: {
+    kind: CashMovementKind;
+    amount: number;
+    reason: string;
+  }): Promise<ApiResult<CashMovement>>;
+  print(shiftId: number, paper: '80mm' | 'a4'): Promise<ApiResult<{ printed: boolean }>>;
+}
+
 export interface StaffApi {
   listWaiters(): Promise<ApiResult<Waiter[]>>;
   saveWaiter(input: WaiterInput & { id?: number }): Promise<ApiResult<Waiter>>;
@@ -676,6 +755,7 @@ export interface RendererApi {
   settings: SettingsApi;
   users: UsersApi;
   payments: PaymentsApi;
+  shifts: ShiftsApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -710,6 +790,14 @@ export const CHANNELS = {
   udhaarList: 'udhaar:list',
   udhaarSettle: 'udhaar:settle',
   udhaarLedger: 'udhaar:ledger',
+
+  shiftCurrent: 'shift:current',
+  shiftOpen: 'shift:open',
+  shiftClose: 'shift:close',
+  shiftReport: 'shift:x-report',
+  shiftList: 'shift:list',
+  shiftCashMovement: 'shift:cash-movement',
+  shiftPrint: 'shift:print',
 
   waiters: 'staff:waiters',
   waiterSave: 'staff:waiter-save',

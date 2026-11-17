@@ -11,6 +11,7 @@ import { createStaffRepository } from './db/repositories/staffRepository';
 import { createVehiclesRepository } from './db/repositories/vehiclesRepository';
 import { createSequenceRepository } from './db/repositories/sequenceRepository';
 import { createPaymentsRepository } from './db/repositories/paymentsRepository';
+import { createShiftsRepository } from './db/repositories/shiftsRepository';
 import { seedDefaultAdmin } from './db/seed';
 import { seedDemoData } from './db/seedDemo';
 import { createAuthService } from './services/authService';
@@ -23,6 +24,7 @@ import { createVehiclesService } from './services/vehiclesService';
 import { createReportsService } from './services/reportsService';
 import { createCsvService } from './services/csvService';
 import { createPaymentsService } from './services/paymentsService';
+import { createShiftsService } from './services/shiftsService';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
@@ -92,6 +94,7 @@ async function bootstrapServices(): Promise<void> {
   const vehiclesRepo = createVehiclesRepository(db);
   const sequences = createSequenceRepository(db);
   const paymentsRepo = createPaymentsRepository(db);
+  const shiftsRepo = createShiftsRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -218,6 +221,7 @@ async function bootstrapServices(): Promise<void> {
     print: printService,
     csv: csvService,
     payments: createPaymentsService({ payments: paymentsRepo, orders: ordersRepo }),
+    shifts: createShiftsService({ shifts: shiftsRepo, orders: ordersRepo }),
   });
 }
 

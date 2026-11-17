@@ -10,6 +10,7 @@ import type { BackupService } from '../services/backupService';
 import type { PrintService } from '../services/printService';
 import type { CsvService } from '../services/csvService';
 import type { PaymentsService } from '../services/paymentsService';
+import type { ShiftsService } from '../services/shiftsService';
 import { authHandlers } from './auth.ipc';
 import { menuHandlers } from './menu.ipc';
 import { ordersHandlers } from './orders.ipc';
@@ -19,6 +20,7 @@ import { reportsHandlers } from './reports.ipc';
 import { settingsHandlers } from './settings.ipc';
 import { usersHandlers } from './users.ipc';
 import { paymentsHandlers } from './payments.ipc';
+import { shiftsHandlers } from './shifts.ipc';
 import type { HandlerRegistry } from './registry';
 
 export interface IpcServices {
@@ -34,6 +36,7 @@ export interface IpcServices {
   print: PrintService;
   csv: CsvService;
   payments: PaymentsService;
+  shifts: ShiftsService;
 }
 
 /**
@@ -52,6 +55,7 @@ export function buildRegistry(services: IpcServices): HandlerRegistry {
     ...settingsHandlers(services.settings, services.backups),
     ...usersHandlers(services.users),
     ...paymentsHandlers(services.payments),
+    ...shiftsHandlers(services.shifts, services.print),
   };
 }
 

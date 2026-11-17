@@ -54,6 +54,7 @@ const repos = {
   vehicles: load('db/repositories/vehiclesRepository.js').createVehiclesRepository(db),
   sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
   payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
+  shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
 };
 
 const auth = load('services/authService.js').createAuthService(repos.users);
@@ -105,6 +106,9 @@ const registry = buildRegistry({
       throw new Error('Printing is not available in the browser preview');
     },
     savePdf: async () => null,
+    printShiftReport: async () => {
+      throw new Error('Printing is not available in the browser preview');
+    },
     renderHtml: load('services/printService.js').renderInvoiceHtml,
   },
   csv: load('services/csvService.js').createCsvService({
@@ -114,6 +118,10 @@ const registry = buildRegistry({
   }),
   payments: load('services/paymentsService.js').createPaymentsService({
     payments: repos.payments,
+    orders: repos.orders,
+  }),
+  shifts: load('services/shiftsService.js').createShiftsService({
+    shifts: repos.shifts,
     orders: repos.orders,
   }),
 });

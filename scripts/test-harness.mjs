@@ -48,6 +48,7 @@ export function createHarness({ withDemoData = true } = {}) {
     vehicles: load('db/repositories/vehiclesRepository.js').createVehiclesRepository(db),
     sequences: load('db/repositories/sequenceRepository.js').createSequenceRepository(db),
     payments: load('db/repositories/paymentsRepository.js').createPaymentsRepository(db),
+    shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -116,6 +117,7 @@ export function createHarness({ withDemoData = true } = {}) {
       return true;
     },
     savePdf: async () => null,
+    printShiftReport: async () => true,
     renderHtml: renderInvoiceHtml,
   };
 
@@ -140,6 +142,10 @@ export function createHarness({ withDemoData = true } = {}) {
     csv: csvService,
     payments: load('services/paymentsService.js').createPaymentsService({
       payments: repositories.payments,
+      orders: repositories.orders,
+    }),
+    shifts: load('services/shiftsService.js').createShiftsService({
+      shifts: repositories.shifts,
       orders: repositories.orders,
     }),
   });

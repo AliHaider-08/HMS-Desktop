@@ -74,10 +74,16 @@ function toLedger(row: LedgerRow): CustomerLedgerEntry {
 export function createPaymentsRepository(db: AppDatabase) {
   const insertPayment = db.prepare(`
     INSERT INTO payments
-      (order_id, method, amount, tendered, change_due, reference, created_by, created_at)
+      (order_id, method, amount, tendered, change_due, reference, created_by, created_at, shift_id)
     VALUES
-      (@orderId, @method, @amount, @tendered, @changeDue, @reference, @createdBy, @createdAt)
+      (@orderId, @method, @amount, @tendered, @changeDue, @reference, @createdBy, @createdAt, @shiftId)
   `);
+
+  // The open shift for this counter; a payment is stamped with it so the Z report
+  // is a plain sum rather than a date guess.
+  const selectOpenShift = db.prepare<[], { id: number }>(
+    "SELECT id FROM shifts WHERE terminal = 'counter-1' AND status = 'open'",
+  );
 
   const selectPayment = db.prepare<[number], PaymentRow>('SELECT * FROM payments WHERE id = ?');
 
@@ -188,6 +194,8 @@ export function createPaymentsRepository(db: AppDatabase) {
         const order = orderTotals.get(input.orderId);
         if (!order) throw new Error(`Order ${input.orderId} does not exist`);
 
+        const shiftId = selectOpenShift.get()?.id ?? null;
+
         if (input.method === 'credit') {
           // Nothing collected now: only the ledger changes.
           recordCharge(input.orderId, input.amount, input.reference || 'Udhaar (pay later)');
@@ -196,6 +204,7 @@ export function createPaymentsRepository(db: AppDatabase) {
             ...input,
             amount: input.amount,
             createdAt: toSqlDateTime(),
+            shiftId,
           });
 
           const row = selectPayment.get(Number(created.lastInsertRowid));
@@ -204,7 +213,7 @@ export function createPaymentsRepository(db: AppDatabase) {
           return toPayment(row);
         }
 
-        const created = insertPayment.run({ ...input, createdAt: toSqlDateTime() });
+        const created = insertPayment.run({ ...input, createdAt: toSqlDateTime(), shiftId });
         const row = selectPayment.get(Number(created.lastInsertRowid));
         if (!row) throw new Error('Payment was not saved');
 

@@ -1,6 +1,6 @@
 import type { BrowserWindow } from 'electron';
 import { writeFileSync } from 'node:fs';
-import type { InvoiceData } from '../../src/types/api';
+import type { InvoiceData, ShiftReport } from '../../src/types/api';
 import { formatAmount } from '../utils/money';
 import { formatDate, formatDateTime, toSqlDate } from '../utils/datetime';
 import { AppError } from '../utils/errors';
@@ -147,6 +147,140 @@ export function renderInvoiceHtml(data: InvoiceData, paper: PaperSize): string {
 </html>`;
 }
 
+const PAYMENT_METHOD_TEXT: Record<string, string> = {
+  cash: 'Cash',
+  card: 'Card',
+  jazzcash: 'JazzCash',
+  easypaisa: 'Easypaisa',
+  bank_transfer: 'Bank',
+  credit: 'Udhaar',
+};
+
+/**
+ * Printable X (open shift) / Z (closed shift) report (feature 3.B).
+ * Same look as the invoice so one thermal printer serves both.
+ */
+export function renderShiftReportHtml(data: ShiftReport, paper: PaperSize): string {
+  const isThermal = paper === '80mm';
+  const { shift } = data;
+  const isZ = shift.status === 'closed';
+
+  const methodRows = data.salesByMethod
+    .map(
+      (row) => `<tr>
+        <td>${escapeHtml(PAYMENT_METHOD_TEXT[row.method] ?? row.method)}</td>
+        <td class="right">${row.count}</td>
+        <td class="right">${formatAmount(row.total)}</td>
+      </tr>`,
+    )
+    .join('');
+
+  const topRows = data.topItems
+    .map(
+      (item) => `<tr>
+        <td>${escapeHtml(item.name)}</td>
+        <td class="right">${item.qty}</td>
+      </tr>`,
+    )
+    .join('');
+
+  const cashLine = (label: string, value: number, sign = '') =>
+    `<tr><td>${label}</td><td class="right">${sign}${formatAmount(value)}</td></tr>`;
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>${isZ ? 'Z' : 'X'} report</title>
+<style>
+  @page { size: ${isThermal ? '80mm auto' : 'A4'}; margin: ${isThermal ? '3mm' : '12mm'}; }
+  body { font-family: 'Courier New', monospace; font-size: ${isThermal ? '11px' : '12px'};
+         color: #111; margin: 0; }
+  h1 { font-size: ${isThermal ? '14px' : '18px'}; text-align: center; margin: 0 0 2px; }
+  .center { text-align: center; }
+  .muted { color: #555; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  td, th { padding: 1px 0; vertical-align: top; }
+  th { text-align: left; font-size: ${isThermal ? '10px' : '11px'}; border-bottom: 1px dashed #999; }
+  .right { text-align: right; }
+  .total { font-weight: bold; border-top: 1px solid #111; }
+  hr { border: 0; border-top: 1px dashed #999; margin: 5px 0; }
+</style>
+</head>
+<body>
+  <h1>${isZ ? 'Z Report (day close)' : 'X Report (mid day)'}</h1>
+  <p class="center muted">Gul Khan Fast Food</p>
+  <hr />
+  <table>
+    <tr><td>Shift</td><td class="right">#${shift.id}</td></tr>
+    <tr><td>Terminal</td><td class="right">${escapeHtml(shift.terminal)}</td></tr>
+    <tr><td>Opened by</td><td class="right">${escapeHtml(shift.openedByName)}</td></tr>
+    <tr><td>Opened</td><td class="right">${formatDateTime(shift.openedAt)}</td></tr>
+    <tr><td>Closed</td><td class="right">${
+      shift.closedAt ? formatDateTime(shift.closedAt) : 'still open'
+    }</td></tr>
+  </table>
+
+  <hr />
+  <h2 style="font-size:${isThermal ? '12px' : '14px'};margin:0">Sales by method</h2>
+  <table>
+    <tr><th>Method</th><th class="right">Count</th><th class="right">Amount</th></tr>
+    ${methodRows || '<tr><td colspan="3" class="muted">No payments in this shift</td></tr>'}
+    <tr class="total"><td>Total collected</td><td class="right">${data.orderCount}</td>
+      <td class="right">${formatAmount(data.totalSales)}</td></tr>
+  </table>
+
+  <hr />
+  <h2 style="font-size:${isThermal ? '12px' : '14px'};margin:0">Cash drawer</h2>
+  <table>
+    ${cashLine('Opening float', shift.openingCash)}
+    ${cashLine('Cash sales', data.cashSales)}
+    ${cashLine('Cash in', data.cashIn, '+')}
+    ${cashLine('Cash out', data.cashOut, '-')}
+    ${cashLine('Refunds', data.refunds, '-')}
+    ${cashLine('Expenses', data.expenses, '-')}
+    <tr class="total"><td>Expected cash</td><td class="right">${formatAmount(
+      data.expectedCash,
+    )}</td></tr>
+    ${
+      shift.countedCash !== null
+        ? `<tr><td>Counted cash</td><td class="right">${formatAmount(shift.countedCash)}</td></tr>`
+        : ''
+    }
+    ${
+      shift.difference !== null
+        ? `<tr class="total"><td>Difference</td><td class="right">${
+            shift.difference < 0 ? '-' : ''
+          }${formatAmount(Math.abs(shift.difference))}</td></tr>`
+        : ''
+    }
+  </table>
+
+  <hr />
+  <table>
+    <tr><td>Discount given</td><td class="right">${formatAmount(data.discountTotal)}</td></tr>
+    <tr><td>Cancelled orders</td><td class="right">${data.cancelledCount}</td></tr>
+    <tr><td>Cancelled value</td><td class="right">${formatAmount(data.cancelledValue)}</td></tr>
+  </table>
+
+  ${
+    topRows
+      ? `<hr />
+  <h2 style="font-size:${isThermal ? '12px' : '14px'};margin:0">Top items</h2>
+  <table>
+    <tr><th>Item</th><th class="right">Qty</th></tr>
+    ${topRows}
+  </table>`
+      : ''
+  }
+
+  <hr />
+  <p class="center muted">Printed ${formatDate(toSqlDate())} · Gul Khan Fast Food</p>
+</body>
+</html>`;
+}
+
+/** Prints the shift report through a hidden window, like the invoice. */
 export interface PrintServiceDeps {
   /** Returns the window that should host the print job (the app window). */
   getWindow: () => BrowserWindow | null;
@@ -157,8 +291,9 @@ export interface PrintServiceDeps {
 }
 
 export function createPrintService(deps: PrintServiceDeps) {
-  async function withInvoiceWindow<T>(
-    data: InvoiceData,
+  /** Shared hidden-window helper: load HTML, run the task, always destroy the window. */
+  async function withHtmlWindow<T>(
+    html: string,
     paper: PaperSize,
     task: (window: BrowserWindow) => Promise<T>,
   ): Promise<T> {
@@ -172,12 +307,28 @@ export function createPrintService(deps: PrintServiceDeps) {
     });
 
     try {
-      const html = renderInvoiceHtml(data, paper);
       await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       return await task(printWindow);
     } finally {
       printWindow.destroy();
     }
+  }
+
+  async function withInvoiceWindow<T>(
+    data: InvoiceData,
+    paper: PaperSize,
+    task: (window: BrowserWindow) => Promise<T>,
+  ): Promise<T> {
+    return withHtmlWindow(renderInvoiceHtml(data, paper), paper, task);
+  }
+
+  /** Opens a hidden window with the X/Z report HTML and closes it afterwards. */
+  async function withReportWindow<T>(
+    data: ShiftReport,
+    paper: PaperSize,
+    task: (printWindow: BrowserWindow) => Promise<T>,
+  ): Promise<T> {
+    return withHtmlWindow(renderShiftReportHtml(data, paper), paper, task);
   }
 
   return {
@@ -202,6 +353,29 @@ export function createPrintService(deps: PrintServiceDeps) {
       } catch (error) {
         logError('Printing the invoice failed', error);
         throw new AppError('PRINT_ERROR', 'The invoice could not be printed. Check the printer.');
+      }
+    },
+
+    /** Prints an X/Z report through the same hidden-window pattern as invoices. */
+    async printShiftReport(data: ShiftReport, paper: PaperSize): Promise<boolean> {
+      try {
+        return await withReportWindow(data, paper, async (printWindow) => {
+          const printed = await new Promise<boolean>((resolve) => {
+            printWindow.webContents.print(
+              {
+                silent: false,
+                printBackground: true,
+                margins: { marginType: 'none' },
+                pageSize: paper === '80mm' ? { width: 80_000, height: 297_000 } : 'A4',
+              },
+              (success) => resolve(success),
+            );
+          });
+          return printed;
+        });
+      } catch (error) {
+        logError('Printing the shift report failed', error);
+        throw new AppError('PRINT_ERROR', 'The report could not be printed. Check the printer.');
       }
     },
 
