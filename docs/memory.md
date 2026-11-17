@@ -109,8 +109,8 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 
 ## Roadmap status (post-merge spec)
 - Phase 1 (release blockers): **done**, PR open, CI green, no migration used.
-- Phase 2 (payments/udhaar, shifts + X/Z report, discount rules, KOT): **not started**. Will use
-  migrations 008+ in the order payments → shifts → discounts → KOT.
+- Phase 2: payments/udhaar (008), shifts + X/Z report (009) and discount rules (010) **done**.
+  KOT/token (011) remains — next, and the last item of Phase 2.
 - Phase 3 (tables/merge/split, order amendments, hardening: logo out of settings, silent print,
   sandbox, persistent lockout, keyset pagination): not started.
 - Phase 4 (variants/combos, inventory/recipes, Urdu UI): not started.
@@ -125,7 +125,7 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 - Expense/salary history is per month; no multi-year archive screen (data is still stored).
 - Restoring a backup **relaunches the app**; this is intentional (repositories cannot be swapped
   safely). The relaunch itself is not unit-tested — it needs a live Electron app.
-- Phase 2+ features listed in the roadmap are not in this build yet.
+- KOT/token printing and the Phase 3–4 features are not in this build yet.
 - ~~Log rotation is not implemented~~ — **fixed**: `app.log` rotates to `app.log.1` at 5 MB and only
   one old file is kept (`electron/services/logger.ts`, covered by a Phase 6 test).
 
@@ -136,6 +136,33 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 4. `npm run dist:win`, install on a clean PC, re-test login, order + print, backup/restore.
 5. Optional polish after owner feedback: Urdu labels, log rotation, dark mode.
 
+## Discount rules and approval (migration 010)
+Rules are stored per role as percent **x100** (5.5% = 550), so half-percents survive the round
+trip. `discountsService.resolve()` reports `{allowed, needsApproval, amount, errors, promoCode,
+promoId}` and **never clamps**: a discount over the ceiling is an error the cashier must see,
+never a quiet adjustment. Seeded: cashier 10% ceiling / approval above 5%, manager 50% / 25%,
+owner 100% / never.
+
+Decisions that are easy to undo by accident:
+
+- **`discount:approve` is not the capability that guards the channel.** `discount:approve` is
+  gated on `orders:write`. The real flow is a manager walking to the cashier's till and typing
+  their own password into that session; requiring the approver's capability on the session would
+  have made approval impossible without logging the cashier out. The actual gate is the
+  approver's password plus `roleHasCapability(role, 'discount:approve')` in
+  `discountsService.approve()`, which also refuses self-approval.
+- **Approvals are single-use.** The approval is stamped with its order inside the order
+  transaction (`consumeApproval`), so one manager approval cannot be replayed across a shift.
+- **An approval is looked up by its own id**, not by order id — it exists before the order does.
+- **A promo code bypasses the cashier's discretionary ceiling** (the owner authored it) but still
+  cannot exceed the subtotal, and it counts its redemption in the order transaction, which is what
+  makes `max_uses` mean anything. Promos and manual discounts do not stack.
+- **A switched-off rule blocks discounts outright** rather than silently applying old limits.
+- The owner's seeded threshold is **0 = never needs approval**; do not express "no limit" by
+  deactivating the owner's rule.
+
+Editing rules is admin-only (`roles: ['admin']`); promo codes need `discount:write` (managers).
+
 ## Last Updated
 - Date: 2026-11-16
-- By: Arena Agent (Phases 2–6)
+- By: Arena Agent (Phase 2 — 3.C discounts)
