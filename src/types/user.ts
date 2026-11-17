@@ -16,6 +16,7 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
   { key: 'orders', label: 'Orders', path: '/orders', group: 'main' },
   { key: 'menu', label: 'Menu', path: '/menu', group: 'main' },
   { key: 'udhaar', label: 'Udhaar', path: '/udhaar', group: 'main' },
+  { key: 'tables', label: 'Tables', path: '/tables', group: 'main' },
   { key: 'shifts', label: 'Day close', path: '/shifts', group: 'main' },
   { key: 'staff', label: 'Staff', path: '/staff', group: 'staff' },
   { key: 'vehicles', label: 'Vehicles', path: '/vehicles', group: 'staff' },

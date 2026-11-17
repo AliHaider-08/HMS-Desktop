@@ -316,6 +316,7 @@ await runner.check('the preview server wires every service the registry needs', 
     'shifts',
     'discounts',
     'kot',
+    'tables',
   ];
 
   // A key may be shorthand (`auth,`) or explicit (`payments: …`), so match both.
@@ -331,7 +332,7 @@ await runner.check('the preview server wires every service the registry needs', 
   }
 
   // Repositories must be created there too, not just the services.
-  for (const repo of ['payments', 'shifts', 'discounts', 'kot']) {
+  for (const repo of ['payments', 'shifts', 'discounts', 'kot', 'tables']) {
     if (!source.includes(`repositories/${repo}Repository.js`)) {
       throw new Error(`preview-server.mjs does not create the ${repo} repository`);
     }

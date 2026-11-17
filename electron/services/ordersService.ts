@@ -17,6 +17,7 @@ import { percentOf } from '../utils/money';
 import { toSqlDate } from '../utils/datetime';
 import type { DiscountsService } from './discountsService';
 import type { KotRepository } from '../db/repositories/kotRepository';
+import type { TablesRepository } from '../db/repositories/tablesRepository';
 import { AppError } from '../utils/errors';
 import { logInfo } from './logger';
 
@@ -40,10 +41,12 @@ export function createOrdersService(deps: {
   discounts?: DiscountsService;
   /** Optional so the service still boots without the kitchen module. */
   kot?: KotRepository;
+  /** Optional: the floor plan. Without it, dine-in orders are simply unseated. */
+  tables?: TablesRepository;
 }) {
   // `users` is kept in the dependency list because invoices record the cashier name
   // through the orders query; it is available for later phases (audit fields).
-  const { orders, catalog, sequences, settings, staff, discounts, kot } = deps;
+  const { orders, catalog, sequences, settings, staff, discounts, kot, tables } = deps;
 
   function findOrFail(id: number): OrderDetail {
     const order = orders.find(id);
@@ -154,6 +157,16 @@ export function createOrdersService(deps: {
         throw new AppError('NOT_FOUND', 'The selected delivery boy does not exist');
       }
 
+      // A table holds one open bill at a time. This is checked in the main process
+      // so a second till cannot seat two bills at T4 by calling the channel.
+      const tableId = input.type === 'dine_in' ? (input.tableId ?? null) : null;
+      if (tableId !== null) {
+        if (!tables) throw new AppError('VALIDATION_ERROR', 'Tables are not available');
+        if (!tables.isTableFree(tableId, null)) {
+          throw new AppError('CONFLICT', 'That table already has a bill open');
+        }
+      }
+
       const orderPrefix = settings.get('order_prefix') ?? 'ORD';
       const invoicePrefix = settings.get('invoice_prefix') ?? 'INV';
 
@@ -185,6 +198,7 @@ export function createOrdersService(deps: {
           discountReason: input.discountReason ?? '',
           promoCode,
           approvedBy,
+          tableId,
           taxPercent: input.taxPercent,
           tax,
           total,
@@ -192,6 +206,10 @@ export function createOrdersService(deps: {
           createdBy,
           items: lines,
         });
+
+        // Seat the order at its table in the same transaction, so the floor plan can
+        // never show a bill that does not exist.
+        if (tableId !== null) tables?.seatOrder(newOrderId, tableId);
 
         // Count the promo redemption in the same transaction, so a promo with a
         // use limit cannot be oversold by two tills at once (Rules.md R3).

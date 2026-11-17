@@ -18,6 +18,7 @@ const suites = [
   ['Phase 9', 'test-phase9.mjs'],
   ['Phase 10', 'test-phase10.mjs'],
   ['Phase 11', 'test-phase11.mjs'],
+  ['Phase 12', 'test-phase12.mjs'],
 ];
 
 const results = [];

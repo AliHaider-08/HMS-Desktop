@@ -29,6 +29,8 @@ import { createShiftsService } from './services/shiftsService';
 import { createDiscountsService } from './services/discountsService';
 import { createKotService } from './services/kotService';
 import { createKotRepository } from './db/repositories/kotRepository';
+import { createTablesRepository } from './db/repositories/tablesRepository';
+import { createTablesService } from './services/tablesService';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
@@ -101,6 +103,7 @@ async function bootstrapServices(): Promise<void> {
   const shiftsRepo = createShiftsRepository(db);
   const discountsRepo = createDiscountsRepository(db);
   const kotRepo = createKotRepository(db);
+  const tablesRepo = createTablesRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -224,6 +227,8 @@ async function bootstrapServices(): Promise<void> {
       discounts: discountsService,
       // Allocates the customer token inside the order transaction.
       kot: kotRepo,
+      // Seats a dine-in order and enforces one open bill per table.
+      tables: tablesRepo,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: vehiclesRepo, staff: staffRepo }),
@@ -237,6 +242,13 @@ async function bootstrapServices(): Promise<void> {
     shifts: createShiftsService({ shifts: shiftsRepo, orders: ordersRepo }),
     discounts: discountsService,
     kot: createKotService({ kot: kotRepo, print: printService, settings: settingsRepo }),
+    tables: createTablesService({
+      tables: tablesRepo,
+      orders: ordersRepo,
+      payments: paymentsRepo,
+      sequences,
+      settings: settingsRepo,
+    }),
   });
 }
 

@@ -51,6 +51,7 @@ export function createHarness({ withDemoData = true } = {}) {
     shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
     discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
     kot: load('db/repositories/kotRepository.js').createKotRepository(db),
+    tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -142,6 +143,7 @@ export function createHarness({ withDemoData = true } = {}) {
       users: repositories.users,
       discounts: discountsService,
       kot: repositories.kot,
+      tables: repositories.tables,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: repositories.vehicles, staff: repositories.staff }),
@@ -163,6 +165,13 @@ export function createHarness({ withDemoData = true } = {}) {
     kot: load('services/kotService.js').createKotService({
       kot: repositories.kot,
       print: printStub,
+      settings: repositories.settings,
+    }),
+    tables: load('services/tablesService.js').createTablesService({
+      tables: repositories.tables,
+      orders: repositories.orders,
+      payments: repositories.payments,
+      sequences: repositories.sequences,
       settings: repositories.settings,
     }),
   });

@@ -45,6 +45,8 @@ export function NewOrderPage() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [orderType, setOrderType] = useState<OrderType>('dine_in');
   const [waiterId, setWaiterId] = useState<string>('');
+  // Dine-in only. Empty means "no table", which the main process allows.
+  const [tableId, setTableId] = useState<string>('');
   const [deliveryBoyId, setDeliveryBoyId] = useState<string>('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -71,6 +73,7 @@ export function NewOrderPage() {
   const categories = useAsync(async () => unwrap(await getApi().menu.listCategories()), []);
   const items = useAsync(async () => unwrap(await getApi().menu.listItems()), []);
   const waiters = useAsync(async () => unwrap(await getApi().staff.listWaiters()), []);
+  const tables = useAsync(async () => unwrap(await getApi().tables.list()), []);
   const riders = useAsync(async () => unwrap(await getApi().staff.listDeliveryBoys()), []);
 
   // The shop's default tax is used until the cashier types their own value.
@@ -217,6 +220,7 @@ export function NewOrderPage() {
           customerPhone,
           customerAddress,
           waiterId: waiterId ? Number(waiterId) : null,
+          tableId: orderType === 'dine_in' && tableId ? Number(tableId) : null,
           deliveryBoyId: deliveryBoyId ? Number(deliveryBoyId) : null,
           discount: safeDiscount,
           promoCode,
@@ -407,6 +411,24 @@ export function NewOrderPage() {
             </div>
 
             <div className="flex flex-col gap-3">
+              {orderType === 'dine_in' && (
+                <Select
+                  label="Table"
+                  placeholder="No table"
+                  hint="Only free tables are listed. Leave empty for a counter order."
+                  options={(tables.data ?? [])
+                    .filter((table) => table.active && table.orderId === null)
+                    .map((table) => ({
+                      value: String(table.id),
+                      label: `${table.name} · ${table.seats} seats${
+                        table.area ? ` · ${table.area}` : ''
+                      }`,
+                    }))}
+                  value={tableId}
+                  onChange={(event) => setTableId(event.target.value)}
+                />
+              )}
+
               {orderType === 'dine_in' && (
                 <Select
                   label="Waiter"

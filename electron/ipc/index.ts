@@ -13,6 +13,7 @@ import type { PaymentsService } from '../services/paymentsService';
 import type { ShiftsService } from '../services/shiftsService';
 import type { DiscountsService } from '../services/discountsService';
 import type { KotService } from '../services/kotService';
+import type { TablesService } from '../services/tablesService';
 import { authHandlers } from './auth.ipc';
 import { menuHandlers } from './menu.ipc';
 import { ordersHandlers } from './orders.ipc';
@@ -25,6 +26,7 @@ import { paymentsHandlers } from './payments.ipc';
 import { shiftsHandlers } from './shifts.ipc';
 import { discountsHandlers } from './discounts.ipc';
 import { kotHandlers } from './kot.ipc';
+import { tablesHandlers } from './tables.ipc';
 import type { HandlerRegistry } from './registry';
 
 export interface IpcServices {
@@ -43,6 +45,7 @@ export interface IpcServices {
   shifts: ShiftsService;
   discounts: DiscountsService;
   kot: KotService;
+  tables: TablesService;
 }
 
 /**
@@ -64,6 +67,7 @@ export function buildRegistry(services: IpcServices): HandlerRegistry {
     ...shiftsHandlers(services.shifts, services.print),
     ...discountsHandlers(services.discounts),
     ...kotHandlers(services.kot),
+    ...tablesHandlers(services.tables),
   };
 }
 

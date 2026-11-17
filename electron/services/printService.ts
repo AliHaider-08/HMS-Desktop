@@ -104,6 +104,11 @@ export function renderInvoiceHtml(data: InvoiceData, paper: PaperSize): string {
       <div><span>Cashier</span><span>${escapeHtml(cashierName)}</span></div>
       <div><span>Type</span><span>${ORDER_TYPE_TEXT[order.type] ?? order.type}</span></div>
       ${
+        order.splitFromOrderId !== null && order.splitFromOrderId !== undefined
+          ? `<div><span>Split from</span><span>order #${order.splitFromOrderId}</span></div>`
+          : ''
+      }
+      ${
         order.customerName || order.customerPhone
           ? `<div><span>Customer</span><span>${escapeHtml(
               [order.customerName, order.customerPhone].filter(Boolean).join(' · '),

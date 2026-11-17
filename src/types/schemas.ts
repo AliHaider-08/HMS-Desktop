@@ -92,6 +92,8 @@ export const newOrderSchema = z
     customerAddress: optionalText(200, 'Address'),
     waiterId: z.number().int().positive().nullable().default(null),
     deliveryBoyId: z.number().int().positive().nullable().default(null),
+    // Dine-in only; ignored for takeaway and delivery (enforced in the service).
+    tableId: z.number(message).int().positive().nullable().default(null),
     discount: paisaField.default(0),
     discountReason: optionalText(200, 'Discount reason'),
     promoCode: optionalText(30, 'Promo code'),
@@ -457,3 +459,43 @@ export const promoSchema = z
 export const kotPrintSchema = z.object({
   orderId: idField,
 });
+
+/* --------------------- tables, merge and split (Phase 3) --------------------- */
+
+export const tableSchema = z.object({
+  id: z.number(message).int().positive().optional(),
+  name: z
+    .string(message)
+    .trim()
+    .min(1, 'Give the table a name')
+    .max(12, 'Keep the table name short')
+    .regex(/^[A-Za-z0-9 -]+$/, 'Use letters and numbers only'),
+  seats: z.number(message).int().min(1, 'A table needs at least one seat').max(40),
+  area: optionalText(40, 'Area'),
+  active: z.boolean().default(true),
+});
+
+export const tableDeleteSchema = z.object({ id: idField });
+
+export const mergeSchema = z
+  .object({
+    sourceId: idField,
+    targetId: idField,
+  })
+  .refine((values) => values.sourceId !== values.targetId, {
+    message: 'Choose two different bills',
+    path: ['targetId'],
+  });
+
+export const splitSchema = z
+  .object({
+    orderId: idField,
+    itemIds: z.array(idField).min(1, 'Choose at least one line to move').max(100),
+    /** Send the moved lines to a new table (true) or leave the new bill unseated. */
+    moveTable: z.boolean().default(false),
+  })
+  // Duplicated ids would move the same line twice.
+  .refine((values) => new Set(values.itemIds).size === values.itemIds.length, {
+    message: 'The same line was selected twice',
+    path: ['itemIds'],
+  });

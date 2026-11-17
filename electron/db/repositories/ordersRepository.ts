@@ -1,4 +1,5 @@
 import type { AppDatabase } from '../connection';
+import { AppError } from '../../utils/errors';
 import type {
   OrderDetail,
   OrderFilter,
@@ -16,6 +17,9 @@ interface OrderRow {
   type: OrderType;
   status: OrderStatus;
   token_no: number | null;
+  merged_into_order_id: number | null;
+  split_from_order_id: number | null;
+  table_id: number | null;
   customer_name: string;
   customer_phone: string;
   customer_address: string;
@@ -48,6 +52,7 @@ interface OrderItemRow {
 
 const ORDER_SELECT = `
   SELECT o.id, o.order_no, i.invoice_no, o.type, o.status, o.token_no,
+         o.merged_into_order_id, o.split_from_order_id, o.table_id,
          o.customer_name, o.customer_phone, o.customer_address,
          o.waiter_id, o.delivery_boy_id,
          w.name AS waiter_name,
@@ -69,6 +74,9 @@ const toSummary = (row: OrderRow): OrderSummary => ({
   type: row.type,
   status: row.status,
   tokenNo: row.token_no,
+  mergedIntoOrderId: row.merged_into_order_id,
+  splitFromOrderId: row.split_from_order_id,
+  tableId: row.table_id,
   customerName: row.customer_name,
   customerPhone: row.customer_phone,
   subtotal: row.subtotal,
@@ -110,12 +118,12 @@ export function createOrdersRepository(db: AppDatabase) {
       order_no, type, customer_id, customer_name, customer_phone, customer_address,
       waiter_id, delivery_boy_id, status, subtotal, discount, tax_percent, tax, total,
       notes, created_by, created_at, updated_at,
-      discount_reason, promo_code, approved_by, token_no
+      discount_reason, promo_code, approved_by, token_no, table_id
     ) VALUES (
       @orderNo, @type, @customerId, @customerName, @customerPhone, @customerAddress,
       @waiterId, @deliveryBoyId, @status, @subtotal, @discount, @taxPercent, @tax, @total,
       @notes, @createdBy, @now, @now,
-      @discountReason, @promoCode, @approvedBy, @tokenNo
+      @discountReason, @promoCode, @approvedBy, @tokenNo, @tableId
     )
   `);
   const insertOrderItem = db.prepare(`
@@ -133,6 +141,31 @@ export function createOrdersRepository(db: AppDatabase) {
     'UPDATE orders SET status = ?, updated_at = ?, cancelled_at = ? WHERE id = ?',
   );
   const markPrinted = db.prepare('UPDATE invoices SET printed_at = ? WHERE order_id = ?');
+
+  /* ------------------------- merge / split (Phase 3) ------------------------- */
+
+  const selectItemRows = db.prepare<[number], OrderItemRow>(
+    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE order_id = ? ORDER BY id',
+  );
+  const selectItemById = db.prepare<[number], OrderItemRow>(
+    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE id = ?',
+  );
+  const deleteItem = db.prepare('DELETE FROM order_items WHERE id = ?');
+  const reparentItem = db.prepare('UPDATE order_items SET order_id = ? WHERE id = ?');
+  const countItems = db.prepare<[number], { total: number }>(
+    'SELECT COUNT(*) AS total FROM order_items WHERE order_id = ?',
+  );
+  const setMergedInto = db.prepare(
+    'UPDATE orders SET merged_into_order_id = ?, status = ?, updated_at = ? WHERE id = ?',
+  );
+  const setSplitFrom = db.prepare('UPDATE orders SET split_from_order_id = ? WHERE id = ?');
+  const setOrderTotals = db.prepare(
+    'UPDATE orders SET subtotal = ?, discount = ?, tax = ?, total = ?, updated_at = ? WHERE id = ?',
+  );
+  const insertCombine = db.prepare(`
+    INSERT INTO order_combines (kind, source_id, target_id, item_ids, amount, reason, created_by, created_at)
+    VALUES (@kind, @sourceId, @targetId, @itemIds, @amount, @reason, @createdBy, @createdAt)
+  `);
   const findInvoiceNo = db.prepare<[number], { invoice_no: string }>(
     'SELECT invoice_no FROM invoices WHERE order_id = ?',
   );
@@ -190,6 +223,8 @@ export function createOrdersRepository(db: AppDatabase) {
       status: OrderStatus;
       /** Customer-facing token, allocated by kotRepository inside this transaction. */
       tokenNo: number | null;
+      /** Dine-in table, or null for takeaway/delivery. */
+      tableId: number | null;
       customerName: string;
       customerPhone: string;
       customerAddress: string;
@@ -234,6 +269,7 @@ export function createOrdersRepository(db: AppDatabase) {
           promoCode: payload.promoCode ?? '',
           approvedBy: payload.approvedBy ?? null,
           tokenNo: payload.tokenNo ?? null,
+          tableId: payload.tableId ?? null,
           orderNo: payload.orderNo,
           type: payload.type,
           customerId,
@@ -307,6 +343,93 @@ export function createOrdersRepository(db: AppDatabase) {
 
       const rows = db.prepare(sql).all(...params) as OrderRow[];
       return rows.map(toSummary);
+    },
+
+    itemsFor(orderId: number) {
+      return selectItemsForOrder.all(orderId).map(toItem);
+    },
+
+    /**
+     * Recalculates subtotal / discount / tax / total from the lines that are
+     * actually on the order. Merge and split both need this, and both must do it
+     * inside their transaction so a half-moved bill is never visible.
+     *
+     * The discount is recomputed from the same percentage it represented before,
+     * capped at the new subtotal — the alternative is silently keeping a discount
+     * that no longer relates to what the customer is buying.
+     */
+    recalculateTotals(orderId: number): void {
+      const row = selectOrderById.get(orderId);
+      if (!row) throw new AppError('NOT_FOUND', 'That order does not exist');
+
+      const subtotal = selectItemRows
+        .all(orderId)
+        .reduce((total, item) => total + item.line_total, 0);
+
+      const previousSubtotal = row.subtotal > 0 ? row.subtotal : 0;
+      const discountPercent =
+        previousSubtotal > 0 ? Math.round((row.discount / previousSubtotal) * 10_000) : 0;
+      const discount =
+        discountPercent > 0
+          ? Math.min(Math.round((subtotal * discountPercent) / 10_000), subtotal)
+          : 0;
+
+      const taxable = subtotal - discount;
+      const tax = Math.round((taxable * row.tax_percent) / 100);
+
+      setOrderTotals.run(subtotal, discount, tax, taxable + tax, toSqlDateTime(), orderId);
+    },
+
+    /** Moves every line and the discount policy of `sourceId` onto `targetId`. */
+    absorbOrder(sourceId: number, targetId: number): void {
+      for (const item of selectItemRows.all(sourceId)) {
+        reparentItem.run(targetId, item.id);
+      }
+    },
+
+    moveItems(itemIds: number[], targetId: number): void {
+      for (const itemId of itemIds) {
+        reparentItem.run(targetId, itemId);
+      }
+    },
+
+    findItem(id: number) {
+      const row = selectItemById.get(id);
+      return row ? toItem(row) : null;
+    },
+
+    removeItem(id: number): void {
+      deleteItem.run(id);
+    },
+
+    itemCount(orderId: number): number {
+      return countItems.get(orderId)?.total ?? 0;
+    },
+
+    /** Marks an order as absorbed by another one. Its money stays where it is. */
+    markMerged(mergedInto: number, sourceId: number): void {
+      const now = toSqlDateTime();
+      setMergedInto.run(mergedInto, 'delivered', now, sourceId);
+    },
+
+    markSplitFrom(sourceId: number, targetId: number): void {
+      setSplitFrom.run(sourceId, targetId);
+    },
+
+    recordCombine(input: {
+      kind: 'merge' | 'split';
+      sourceId: number;
+      targetId: number;
+      itemIds: number[];
+      amount: number;
+      reason: string;
+      createdBy: number;
+    }): void {
+      insertCombine.run({
+        ...input,
+        itemIds: JSON.stringify(input.itemIds),
+        createdAt: toSqlDateTime(),
+      });
     },
 
     updateStatus(id: number, status: OrderStatus): void {

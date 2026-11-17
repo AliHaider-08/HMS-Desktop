@@ -57,6 +57,7 @@ const repos = {
   shifts: load('db/repositories/shiftsRepository.js').createShiftsRepository(db),
   discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
   kot: load('db/repositories/kotRepository.js').createKotRepository(db),
+  tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
 };
 
 // Printing needs a real window. The preview throws so the UI reports it honestly,
@@ -109,6 +110,7 @@ const registry = buildRegistry({
     users: repos.users,
     discounts: discountsService,
     kot: repos.kot,
+    tables: repos.tables,
   }),
   staff: staffService,
   vehicles: load('services/vehiclesService.js').createVehiclesService({
@@ -144,6 +146,13 @@ const registry = buildRegistry({
   kot: load('services/kotService.js').createKotService({
     kot: repos.kot,
     print: printStub,
+    settings: repos.settings,
+  }),
+  tables: load('services/tablesService.js').createTablesService({
+    tables: repos.tables,
+    orders: repos.orders,
+    payments: repos.payments,
+    sequences: repos.sequences,
     settings: repos.settings,
   }),
 });

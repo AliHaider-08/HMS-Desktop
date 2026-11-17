@@ -21,7 +21,9 @@ export type PageKey =
   // Phase 2 (3.A) — customer credit ("udhaar") ledger.
   | 'udhaar'
   // Phase 2 (3.B) — day close.
-  | 'shifts';
+  | 'shifts'
+  // Phase 3 — dine-in floor plan, merging and splitting bills.
+  | 'tables';
 
 /** Fine grained write permissions, so a cashier can open the menu but not edit it. */
 export type Capability =
@@ -45,7 +47,9 @@ export type Capability =
   // Phase 2 (3.C) — discount rules and manager approval.
   | 'discount:write'
   | 'discount:approve'
-  | 'kot:print';
+  | 'kot:print'
+  // Editing the floor plan, merging bills and splitting them.
+  | 'tables:write';
 
 export interface RolePermissions {
   role: UserRole;
@@ -319,6 +323,8 @@ export interface NewOrderInput {
   customerAddress: string;
   waiterId: number | null;
   deliveryBoyId: number | null;
+  /** Dine-in table. Ignored (and cleared) for takeaway and delivery. */
+  tableId?: number | null;
   discount: number;
   /** Why the discount was given. Stored on the order for the audit trail. */
   discountReason?: string;
@@ -337,6 +343,12 @@ export interface OrderSummary {
   type: OrderType;
   status: OrderStatus;
   tokenNo: number | null;
+  /** Set when this bill was merged into another one; its money stayed here. */
+  mergedIntoOrderId: number | null;
+  /** Set when this bill was carved out of another one. */
+  splitFromOrderId: number | null;
+  /** The dine-in table this bill sits at, if any. */
+  tableId: number | null;
   customerName: string;
   customerPhone: string;
   subtotal: number;
@@ -369,6 +381,38 @@ export interface OrderFilter {
   fromDate: string;
   toDate: string;
   limit: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dine-in tables, merge and split (Phase 3)                           */
+/* ------------------------------------------------------------------ */
+
+export interface DiningTable {
+  id: number;
+  name: string;
+  seats: number;
+  area: string;
+  active: boolean;
+  /** The open dine-in order sitting here, if any. */
+  orderId: number | null;
+  orderNo: string | null;
+  /** What that order is worth so far, in paisa. 0 when the table is free. */
+  openTotal: number;
+  /** Total of everything ever rung up at this table, for the owner's report. */
+  lifetimeSales: number;
+}
+
+export interface MergeResult {
+  order: OrderDetail;
+  /** The order numbers that were absorbed, oldest first. */
+  mergedOrderNos: string[];
+}
+
+export interface SplitResult {
+  /** The bill the lines were taken from. */
+  source: OrderDetail;
+  /** The new bill holding the moved lines. */
+  target: OrderDetail;
 }
 
 /* ------------------------------------------------------------------ */
@@ -753,6 +797,26 @@ export interface DiscountsApi {
   deletePromo(id: number): Promise<ApiResult<null>>;
 }
 
+export interface TablesApi {
+  list(): Promise<ApiResult<DiningTable[]>>;
+  save(input: {
+    id?: number;
+    name: string;
+    seats: number;
+    area: string;
+    active: boolean;
+  }): Promise<ApiResult<DiningTable>>;
+  remove(id: number): Promise<ApiResult<null>>;
+  /** Merges sourceId into targetId; both must be open dine-in orders with no money taken. */
+  merge(input: { sourceId: number; targetId: number }): Promise<ApiResult<MergeResult>>;
+  /** Moves the given order lines onto a brand new bill. */
+  split(input: {
+    orderId: number;
+    itemIds: number[];
+    moveTable: boolean;
+  }): Promise<ApiResult<SplitResult>>;
+}
+
 export interface KotApi {
   /** The ticket for one order. Read-only; no side effects. */
   ticket(orderId: number): Promise<ApiResult<KOT>>;
@@ -873,6 +937,7 @@ export interface RendererApi {
   shifts: ShiftsApi;
   discounts: DiscountsApi;
   kot: KotApi;
+  tables: TablesApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -927,6 +992,13 @@ export const CHANNELS = {
   // Kitchen tickets (feature 3.D)
   kotTicket: 'kot:ticket',
   kotPrint: 'kot:print',
+
+  // Dine-in tables, merge and split (Phase 3)
+  tablesList: 'tables:list',
+  tableSave: 'table:save',
+  tableDelete: 'table:delete',
+  orderMerge: 'order:merge',
+  orderSplit: 'order:split',
 
   waiters: 'staff:waiters',
   waiterSave: 'staff:waiter-save',

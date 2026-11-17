@@ -20,9 +20,10 @@ const ROLE_PAGES: Record<UserRole, PageKey[]> = {
     'settings',
     'udhaar',
     'shifts',
+    'tables',
   ],
-  manager: ['home', 'orders', 'menu', 'staff', 'vehicles', 'reports', 'udhaar', 'shifts'],
-  cashier: ['home', 'orders', 'menu', 'udhaar', 'shifts'],
+  manager: ['home', 'orders', 'menu', 'staff', 'vehicles', 'reports', 'udhaar', 'shifts', 'tables'],
+  cashier: ['home', 'orders', 'menu', 'udhaar', 'shifts', 'tables'],
 };
 
 const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
@@ -45,6 +46,7 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'discount:write',
     'discount:approve',
     'kot:print',
+    'tables:write',
   ],
   manager: [
     'orders:write',
@@ -62,6 +64,7 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'discount:write',
     'discount:approve',
     'kot:print',
+    'tables:write',
   ],
   // A cashier takes payments and may look at udhaar, but cannot void money or settle
   // a customer account — that is a manager decision.
@@ -75,6 +78,9 @@ const ROLE_CAPABILITIES: Record<UserRole, Capability[]> = {
     'shifts:write',
     'discount:write',
     'kot:print',
+    // NOTE: a cashier deliberately has **no** 'tables:write'. They merge and split
+    // bills all day (both channels are gated on 'orders:write'), but the floor plan
+    // itself — table names, seat counts, removing tables — is a manager decision.
   ],
 };
 

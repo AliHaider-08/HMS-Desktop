@@ -14,6 +14,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   menu: 'Menu',
   udhaar: 'Udhaar',
   shifts: 'Day close',
+  tables: 'Tables',
   staff: 'Staff',
   vehicles: 'Vehicles',
   reports: 'Reports',

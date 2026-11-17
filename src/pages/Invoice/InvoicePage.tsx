@@ -304,6 +304,13 @@ export function InvoicePage() {
               <span>Type</span>
               <span>{data ? ORDER_TYPE_LABELS[data.order.type] : '—'}</span>
             </div>
+            {data?.order.splitFromOrderId !== null &&
+              data?.order.splitFromOrderId !== undefined && (
+                <div className="flex justify-between text-caption text-text-secondary">
+                  <span>Split from</span>
+                  <span>order #{data.order.splitFromOrderId}</span>
+                </div>
+              )}
             {data?.order.customerName && (
               <div className="flex justify-between">
                 <span>Customer</span>

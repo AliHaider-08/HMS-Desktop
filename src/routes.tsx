@@ -12,6 +12,7 @@ import { InvoicePage } from './pages/Invoice/InvoicePage';
 import { StaffPage } from './pages/Staff/StaffPage';
 import { UdhaarPage } from './pages/Udhaar/UdhaarPage';
 import { DayClosePage } from './pages/Shifts/DayClosePage';
+import { TablesPage } from './pages/Tables/TablesPage';
 import { VehiclesPage } from './pages/Vehicles/VehiclesPage';
 import { ReportsPage } from './pages/Reports/ReportsPage';
 import { SettingsPage } from './pages/Settings/SettingsPage';
@@ -55,6 +56,14 @@ export const router = createHashRouter([
         element: (
           <ProtectedRoute requiredPage="menu">
             <MenuPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'tables',
+        element: (
+          <ProtectedRoute requiredPage="tables">
+            <TablesPage />
           </ProtectedRoute>
         ),
       },

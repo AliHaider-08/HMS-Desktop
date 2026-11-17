@@ -69,6 +69,14 @@ const api: RendererApi = {
     deletePromo: (id) => invoke(CHANNELS.promoDelete, { id }),
   },
 
+  tables: {
+    list: () => invoke(CHANNELS.tablesList, {}),
+    save: (input) => invoke(CHANNELS.tableSave, input),
+    remove: (id) => invoke(CHANNELS.tableDelete, { id }),
+    merge: (input) => invoke(CHANNELS.orderMerge, input),
+    split: (input) => invoke(CHANNELS.orderSplit, input),
+  },
+
   kot: {
     ticket: (orderId) => invoke(CHANNELS.kotTicket, { orderId }),
     print: (orderId) => invoke(CHANNELS.kotPrint, { orderId }),
