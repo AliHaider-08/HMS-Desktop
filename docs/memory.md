@@ -111,8 +111,8 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 - Phase 1 (release blockers): **done**, PR open, CI green, no migration used.
 - Phase 2: **done** — payments/udhaar (008), shifts + X/Z report (009), discount rules (010),
   kitchen tickets + tokens (011).
-- Phase 3: tables/merge/split (012) **done**. Remaining: order amendments, then hardening
-  (logo out of settings, silent print, sandbox, persistent lockout, keyset pagination).
+- Phase 3: tables/merge/split (012) and order amendments (013) **done**. Remaining: the hardening
+  block (logo out of settings, silent print, sandbox, persistent lockout, keyset pagination).
 - Phase 4 (variants/combos, inventory/recipes, Urdu UI): not started.
 
 ## Known Issues / Bugs
@@ -125,7 +125,7 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 - Expense/salary history is per month; no multi-year archive screen (data is still stored).
 - Restoring a backup **relaunches the app**; this is intentional (repositories cannot be swapped
   safely). The relaunch itself is not unit-tested — it needs a live Electron app.
-- Phase 3–4 features still missing: order amendments, hardening, variants/combos, inventory, Urdu.
+- Phase 3–4 features still missing: hardening, variants/combos, inventory, Urdu.
 - ~~Log rotation is not implemented~~ — **fixed**: `app.log` rotates to `app.log.1` at 5 MB and only
   one old file is kept (`electron/services/logger.ts`, covered by a Phase 6 test).
 
@@ -206,6 +206,30 @@ Permissions: **merge/split are gated on `orders:write`** — it is till work don
 present. `tables:write` is the floor plan itself (names, seats, removal) and is manager/admin only.
 A careless `.replace()` once gave cashiers `tables:write`; the phase-12 test now pins the boundary.
 
+## Order amendments (migration 013)
+A saved bill can be edited. Three rules make that safe at a till:
+
+1. **What is already paid is untouchable.** If the new total would fall below the money collected,
+   the amendment is refused — there is no refund path that could put the difference back, so
+   refusing is the only honest option. Adding food is always allowed.
+2. **The discount is re-checked against the role of the person editing**, through the same
+   `resolve()` the till uses, manager approval included. Otherwise a cashier could amend their way
+   past a ceiling they could not pass on `create()`.
+3. **Both versions are snapshotted.** `order_amendments` keeps the full before and after (totals and
+   lines), the reason, and the user, in the same transaction as the change.
+   `orders.amendment_count` is a cheap marker for lists and receipts.
+
+Other decisions:
+- An amendment states the **complete new set of lines**, not a delta. That makes the snapshot exact
+  and the recalculation obvious; deltas would need replaying to know what a bill said.
+- Tax is recomputed at the order's **own stored `tax_percent`**, never the current shop default, so
+  changing tax in settings cannot retroactively alter an old bill.
+- A cancelled bill, or one absorbed by a merge, cannot be amended.
+- The receipt and the orders list both say the bill was edited, so a reprinted slip cannot pass
+  itself off as the original.
+- Channel names are singular: `order:amend` / `order:amendments` (not `orders:...`). Two test
+  runs were wasted on that; the registry key list is the quickest way to check.
+
 ## Last Updated
 - Date: 2026-11-16
-- By: Arena Agent (Phase 3 — tables, merge and split)
+- By: Arena Agent (Phase 3 — order amendments)
