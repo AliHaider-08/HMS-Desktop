@@ -233,7 +233,15 @@ function serveStatic(requestUrl, response) {
   const filePath = path.join(distDir, relative);
   const safePath = filePath.startsWith(distDir) ? filePath : path.join(distDir, 'index.html');
 
-  if (!existsSync(safePath) || statSync(safePath).isDirectory()) {
+  /*
+   * Anything that is not a real file is the app itself, and the app needs the
+   * preview bridge injected. That includes `/` — serving dist/index.html raw here
+   * gave a window with no `window.api`, so the login form sat there doing nothing.
+   * Only a genuine asset (js, css, png) is served byte-for-byte.
+   */
+  const isAsset = path.extname(safePath) !== '' && path.extname(safePath) !== '.html';
+
+  if (!isAsset || !existsSync(safePath) || statSync(safePath).isDirectory()) {
     response.writeHead(200, { 'Content-Type': MIME['.html'] });
     response.end(previewHtml());
     return;
