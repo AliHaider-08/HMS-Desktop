@@ -758,6 +758,111 @@ export function createOrdersRepository(db: AppDatabase) {
       }>;
     },
 
+    /**
+     * The P&L's top half (Roadmap 4.G): money from food, and what that food cost.
+     *
+     * Cancelled bills are out. Tax is out of the profit line on purpose — it is
+     * collected for the government and never was the shop's money. `cogs` is NULL
+     * when any sold line has no cost data, because a half-known cost would show a
+     * profit that is not real.
+     */
+    profitAndLoss(fromDate: string, toDate: string) {
+      const sales = db
+        .prepare<[string, string], {
+          orders: number;
+          subtotal: number;
+          discount: number;
+          tax: number;
+          total: number;
+        }>(`
+          SELECT COUNT(*) AS orders,
+                 COALESCE(SUM(subtotal), 0) AS subtotal,
+                 COALESCE(SUM(discount), 0) AS discount,
+                 COALESCE(SUM(tax), 0) AS tax,
+                 COALESCE(SUM(total), 0) AS total
+            FROM orders
+           WHERE status <> 'cancelled' AND date(created_at) BETWEEN ? AND ?
+        `)
+        .get(fromDate, toDate);
+
+      /*
+       * Cost is summed per BILL, not per line.
+       *
+       * `cogs` counts only bills whose every line has a cost. A bill saved before
+       * its item had a recipe carries no snapshot at all, and can never be priced
+       * honestly after the fact; treating it as zero would invent profit, and
+       * treating the whole period as unknown would make the P&L useless forever
+       * in any shop that added recipes later.
+       *
+       * So the two halves are reported side by side: `knownNetSales` and `cogs` are
+       * a like-for-like pair, and `unknownNetSales` says exactly how much of the
+       * period could not be priced. The screen shows the profit of what it can
+       * prove, and names the rest.
+       */
+      const cost = db
+        .prepare<[string, string], {
+          cogs_sales: number;
+          cogs: number;
+          unknown_sales: number;
+          unpriced_bills: number;
+          unpriced_lines: number;
+        }>(`
+          SELECT
+            COALESCE(SUM(CASE WHEN bad.unknown = 0 THEN bad.net_sales END), 0) AS cogs_sales,
+            COALESCE(SUM(bad.cost), 0) AS cogs,
+            COALESCE(SUM(CASE WHEN bad.unknown > 0 THEN bad.net_sales END), 0) AS unknown_sales,
+            COALESCE(SUM(CASE WHEN bad.unknown > 0 THEN 1 ELSE 0 END), 0) AS unpriced_bills,
+            COALESCE(SUM(bad.unknown), 0) AS unpriced_lines
+          FROM (
+            SELECT o.id,
+                   o.subtotal - o.discount AS net_sales,
+                   SUM(CASE WHEN oi.cost_total IS NULL THEN 1 ELSE 0 END) AS unknown,
+                   COALESCE(SUM(oi.cost_total), 0) AS cost
+              FROM orders o
+              JOIN order_items oi ON oi.order_id = o.id
+             WHERE o.status <> 'cancelled' AND date(o.created_at) BETWEEN ? AND ?
+             GROUP BY o.id
+          ) bad
+        `)
+        .get(fromDate, toDate);
+
+      const cancelled = db
+        .prepare<[string, string], { count: number; value: number }>(`
+          SELECT COUNT(*) AS count, COALESCE(SUM(total), 0) AS value
+            FROM orders
+           WHERE status = 'cancelled' AND date(created_at) BETWEEN ? AND ?
+        `)
+        .get(fromDate, toDate);
+
+      const wastage = db
+        .prepare<[string, string], { qty: number; value: number }>(`
+          SELECT COALESCE(SUM(ABS(qty)), 0) AS qty,
+                 COALESCE(SUM(ABS(ROUND(qty * unit_cost_milli / 1000))), 0) AS value
+            FROM stock_movements
+           WHERE kind = 'wastage' AND date(created_at) BETWEEN ? AND ?
+        `)
+        .get(fromDate, toDate);
+
+      return {
+        orders: sales?.orders ?? 0,
+        subtotal: sales?.subtotal ?? 0,
+        discount: sales?.discount ?? 0,
+        tax: sales?.tax ?? 0,
+        total: sales?.total ?? 0,
+        netSales: (sales?.subtotal ?? 0) - (sales?.discount ?? 0),
+        // Sales and cost of the SAME bills: the only pair a profit can come from.
+        knownNetSales: cost?.cogs_sales ?? 0,
+        cogs: cost?.cogs ?? 0,
+        unknownNetSales: cost?.unknown_sales ?? 0,
+        unpricedBills: cost?.unpriced_bills ?? 0,
+        linesWithoutCost: cost?.unpriced_lines ?? 0,
+        cancelled: cancelled?.count ?? 0,
+        cancelledValue: cancelled?.value ?? 0,
+        wastageQty: wastage?.qty ?? 0,
+        wastageValue: wastage?.value ?? 0,
+      };
+    },
+
     deliveriesByBoy(fromDate: string, toDate: string) {
       return db
         .prepare(

@@ -105,6 +105,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
   });
 
   const reportsService = createReportsService({
+    expenses: repositories.expenses,
     orders: repositories.orders,
     catalog: repositories.catalog,
     staff: repositories.staff,

@@ -5,6 +5,7 @@ import { ORDER_TYPE_LABELS } from '../../types/labels';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
 import { useSettings } from '../../store/settingsStore';
+import { useAuth } from '../../hooks/useAuth';
 import {
   currentMonth,
   formatAmount,
@@ -20,11 +21,14 @@ import { Table, type Column } from '../../components/Table';
 import { PageHeader } from '../../components/PageHeader';
 import { Select } from '../../components/Select';
 import { toast } from '../../components/Toast';
+import { Alert } from '../../components/Alert';
 
-type Tab = 'sales' | 'items' | 'delivery' | 'salary' | 'vehicles';
+type Tab = 'profit' | 'sales' | 'items' | 'delivery' | 'salary' | 'vehicles';
 type ExportName = 'daily_sales' | 'top_items' | 'salary' | 'delivery' | 'vehicle_expenses';
 
 const TABS: Array<{ value: Tab; label: string; exportName: ExportName }> = [
+  // Profit first: it is the number the owner opens this page for.
+  { value: 'profit', label: 'Profit & loss', exportName: 'daily_sales' },
   { value: 'sales', label: 'Sales', exportName: 'daily_sales' },
   { value: 'items', label: 'Top items', exportName: 'top_items' },
   { value: 'delivery', label: 'Deliveries', exportName: 'delivery' },
@@ -64,7 +68,8 @@ function prevMonthEnd(): string {
 
 export function ReportsPage() {
   const currency = useSettings((settings) => settings.currency);
-  const [tab, setTab] = useState<Tab>('sales');
+  const { allow } = useAuth();
+  const [tab, setTab] = useState<Tab>('profit');
   const [range, setRange] = useState<DateRange>({ fromDate: monthStartIso(), toDate: todayIso() });
   const [salaryMonth, setSalaryMonth] = useState(currentMonth());
   const [isExporting, setIsExporting] = useState(false);
@@ -72,6 +77,14 @@ export function ReportsPage() {
   const sales = useAsync(
     async () => unwrap(await getApi().reports.range(range)),
     [range.fromDate, range.toDate],
+  );
+
+  // The P&L is gated on costs:read in the main process; a role without it simply
+  // never asks, so the tab shows a dash instead of an error.
+  const canCost = allow('costs:read');
+  const profit = useAsync(
+    async () => (canCost ? unwrap(await getApi().reports.profitAndLoss(range)) : null),
+    [range.fromDate, range.toDate, canCost],
   );
   const salaries = useAsync(
     async () => unwrap(await getApi().reports.salarySummary(salaryMonth)),
@@ -216,6 +229,118 @@ export function ReportsPage() {
           </button>
         ))}
       </div>
+
+      {/* ------------------------------ Profit & loss ------------------------------ */}
+      {tab === 'profit' && (
+        <div className="flex flex-col gap-4">
+          {!canCost && (
+            <Alert tone="info">
+              Your role can see the shop's takings but not its costs, so the profit
+              figures are hidden. Ask the owner for the numbers.
+            </Alert>
+          )}
+
+          {canCost && profit.data && (
+            <>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <SummaryTile label="Net sales" value={formatAmount(profit.data.netSales)} />
+                <SummaryTile label="Cost of food" value={formatAmount(profit.data.cogs)} />
+                <SummaryTile
+                  label="Gross profit"
+                  value={formatAmount(profit.data.grossProfit)}
+                />
+                <SummaryTile
+                  label="Shop expenses"
+                  value={formatAmount(profit.data.shopExpenses)}
+                />
+              </div>
+
+              <Card>
+                <CardHeading
+                  title="Profit & loss"
+                  subtitle={`${formatDate(profit.data.from)} to ${formatDate(profit.data.to)}`}
+                />
+
+                {profit.data.unknownNetSales > 0 && (
+                  <Alert tone="warning">{`${formatAmount(
+                    profit.data.unknownNetSales,
+                  )} of sales in this period came from ${profit.data.unpricedBills} bill${
+                    profit.data.unpricedBills === 1 ? '' : 's'
+                  } saved before ${profit.data.linesWithoutCost === 1 ? 'an item had' : 'their items had'} a recipe, so ${
+                    profit.data.unpricedBills === 1 ? 'it is' : 'they are'
+                  } not counted in the profit below. The two figures together are the whole picture.`}</Alert>
+                )}
+
+                <dl className="mt-3 flex flex-col divide-y divide-border">
+                  <PnlRow label="Food sold (before discount)" value={profit.data.subtotal} />
+                  <PnlRow label="Discounts given" value={profit.data.discount} negative />
+                  <PnlRow label="Net sales" value={profit.data.netSales} strong />
+                  {profit.data.unknownNetSales > 0 && (
+                    <>
+                      <PnlRow
+                        label="  · of which could be costed"
+                        value={profit.data.knownNetSales}
+                      />
+                      <PnlRow
+                        label="  · of which has no recipe"
+                        value={profit.data.unknownNetSales}
+                      />
+                    </>
+                  )}
+                  <PnlRow
+                    label="Cost of the food sold"
+                    value={profit.data.cogs}
+                    negative
+                  />
+                  <PnlRow label="Gross profit" value={profit.data.grossProfit} strong />
+                  <PnlRow
+                    label="Shop expenses"
+                    value={profit.data.shopExpenses}
+                    negative
+                  />
+                  <PnlRow label="Net profit" value={profit.data.netProfit} strong highlight />
+                </dl>
+
+                <p className="mt-3 text-caption text-text-secondary">
+                  Tax of {formatAmount(profit.data.tax)} is collected on behalf of the
+                  government and is not counted as income. {profit.data.orderCount} bills,
+                  of which {profit.data.cancelledCount} were cancelled
+                  {profit.data.cancelledValue > 0
+                    ? ` (${formatAmount(profit.data.cancelledValue)} voided)`
+                    : ''}
+                  . Wastage of {formatAmount(profit.data.wastageValue)} is already inside
+                  the cost of food, because those ingredients were bought and never sold.
+                </p>
+              </Card>
+
+              {profit.data.expensesByCategory.length > 0 && (
+                <Card>
+                  <CardHeading
+                    title="Where the expenses went"
+                    subtitle="The same money, grouped by category."
+                  />
+                  <ul className="mt-2 flex flex-col divide-y divide-border">
+                    {profit.data.expensesByCategory.map((row) => (
+                      <li
+                        key={row.categoryName}
+                        className="flex items-center justify-between py-2"
+                      >
+                        <span>
+                          {row.categoryName}{' '}
+                          <span className="text-caption text-text-secondary">
+                            ({row.count})
+                          </span>
+                        </span>
+                        <span className="font-medium tabular">{formatAmount(row.total)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* -------------------------------- Sales -------------------------------- */}
       {tab === 'sales' && (
@@ -430,6 +555,41 @@ export function ReportsPage() {
         <Download aria-hidden className="h-3.5 w-3.5" />
         Export CSV opens Excel. Amounts are exported in rupees; money is stored in paisa.
       </p>
+    </div>
+  );
+}
+
+/**
+ * One line of the P&L. A NULL value means "unknown", never zero: an item without a
+ * recipe has no cost, and pretending it cost nothing would invent profit.
+ */
+function PnlRow({
+  label,
+  value,
+  negative = false,
+  strong = false,
+  highlight = false,
+}: {
+  label: string;
+  value: number;
+  negative?: boolean;
+  strong?: boolean;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2">
+      <dt className={strong ? 'font-medium' : 'text-text-secondary'}>{label}</dt>
+      <dd
+        className={`tabular ${strong ? 'font-semibold' : ''} ${
+          highlight
+            ? value < 0
+              ? 'text-status-cancelled'
+              : 'text-status-success'
+            : ''
+        }`}
+      >
+        {`${negative ? '−' : ''}${formatAmount(value)}`}
+      </dd>
     </div>
   );
 }

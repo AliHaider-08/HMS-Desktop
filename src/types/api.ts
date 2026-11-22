@@ -1382,8 +1382,61 @@ export interface VehiclesApi {
   removeExpense(id: number): Promise<ApiResult<null>>;
 }
 
+/* ------------------------------------------------------------------ */
+/* Profit & loss (4.G)                                                 */
+/* ------------------------------------------------------------------ */
+
+export interface ProfitAndLoss {
+  from: string;
+  to: string;
+  orderCount: number;
+  /** Food sold before discounts, ex tax. */
+  subtotal: number;
+  discount: number;
+  /** Net sales = subtotal − discount. The revenue the shop actually earned. */
+  netSales: number;
+  /**
+   * Net sales of the bills that COULD be costed. `cogs` and `grossProfit` are built
+   * from this figure, so they are a like-for-like pair and never mix in a bill whose
+   * cost is unknown.
+   */
+  knownNetSales: number;
+  /**
+   * Net sales of the bills that could NOT be costed (saved before their item had a
+   * recipe). Named separately so the profit is honest instead of being zeroed for
+   * the whole period.
+   */
+  unknownNetSales: number;
+  /** How many bills carried an unpriced line. */
+  unpricedBills: number;
+  tax: number;
+  /** Taken at the till, including tax. */
+  totalCollected: number;
+  /**
+   * Cost of the food on the bills that could be costed, from the frozen per-line
+   * snapshot. Never null: the honest split lives in `unknownNetSales` instead.
+   */
+  cogs: number;
+  /** How many sold lines had no cost, so the screen can explain the gap. */
+  linesWithoutCost: number;
+  /** knownNetSales − cogs. */
+  grossProfit: number;
+  /** Operating costs in the window. */
+  shopExpenses: number;
+  /** Salaries already counted inside shopExpenses (0 when none). */
+  wastageValue: number;
+  wastageQty: number;
+  /** grossProfit − shopExpenses. */
+  netProfit: number;
+  /** Cancelled bills, listed so a void never disappears from the hisab. */
+  cancelledCount: number;
+  cancelledValue: number;
+  expensesByCategory: ExpenseSummaryRow[];
+}
+
 export interface ReportsApi {
   dashboard(): Promise<ApiResult<DashboardStats>>;
+  profitAndLoss(range: DateRange): Promise<ApiResult<ProfitAndLoss>>;
   range(range: DateRange): Promise<ApiResult<ReportBundle>>;
   salarySummary(month: string): Promise<ApiResult<SalarySummaryRow[]>>;
   deliveryReport(range: DateRange): Promise<ApiResult<DeliveryReportRow[]>>;
@@ -1564,6 +1617,7 @@ export const CHANNELS = {
   stockSettingsSave: 'stock:settings-save',
 
   // Shop expenses (4.F)
+  reportProfit: 'reports:profit',
   expensesOverview: 'expenses:overview',
   expenseSave: 'expenses:save',
   expenseVoid: 'expenses:void',

@@ -3,6 +3,7 @@ import type {
   DashboardStats,
   DateRange,
   DeliveryReportRow,
+  ProfitAndLoss,
   ReportBundle,
   SalarySummaryRow,
   TopItemRow,
@@ -12,6 +13,7 @@ import type { OrdersRepository } from '../db/repositories/ordersRepository';
 import type { CatalogRepository } from '../db/repositories/catalogRepository';
 import type { StaffRepository } from '../db/repositories/staffRepository';
 import type { VehiclesRepository } from '../db/repositories/vehiclesRepository';
+import type { ExpensesRepository } from '../db/repositories/expensesRepository';
 import type { StaffService } from './staffService';
 import { daysUntil, monthEnd, monthStart, toSqlDate, todaySqlDate } from '../utils/datetime';
 
@@ -39,8 +41,10 @@ export function createReportsService(deps: {
   staff: StaffRepository;
   vehicles: VehiclesRepository;
   staffService: StaffService;
+  /** Shop expenses (4.E). Null while that migration has not run. */
+  expenses?: ExpensesRepository;
 }) {
-  const { orders, catalog, staff, vehicles, staffService } = deps;
+  const { orders, catalog, staff, vehicles, staffService, expenses } = deps;
 
   function fillDaily(
     days: string[],
@@ -100,6 +104,55 @@ export function createReportsService(deps: {
         expiringVehicles: expiringVehicles.sort((a, b) => a.daysLeft - b.daysLeft),
         recentOrders: orders.recent(8),
         salesByDay: fillDaily(week.days, weekRows),
+      };
+    },
+
+    /**
+     * Profit & loss (Roadmap 4.G) — the number the owner actually asked for.
+     *
+     *   net sales − cost of the food sold = gross profit
+     *   gross profit − the shop's expenses = net profit
+     *
+     * Two honesty rules are baked in:
+     *
+     *   * Sales and cost are summed over the SAME bills. A bill saved before its
+     *     item had a recipe can never be priced after the fact, so it is excluded
+     *     from the profit and reported separately as `unknownNetSales`. Zeroing the
+     *     whole period would make the P&L useless in any shop that added recipes
+     *     later; treating those bills as free would invent profit.
+     *   * Tax is shown and then excluded. It is collected for the government; a
+     *     P&L that counts it as income would inflate every margin.
+     */
+    profitAndLoss(range: DateRange): ProfitAndLoss {
+      const sales = orders.profitAndLoss(range.fromDate, range.toDate);
+      const shop = expenses?.summary(range.fromDate, range.toDate) ?? { rows: [], total: 0 };
+
+      // The pair that actually belongs together: the sales we could price, and
+      // what those sales cost.
+      const grossProfit = sales.knownNetSales - sales.cogs;
+
+      return {
+        from: range.fromDate,
+        to: range.toDate,
+        orderCount: sales.orders,
+        subtotal: sales.subtotal,
+        discount: sales.discount,
+        netSales: sales.netSales,
+        knownNetSales: sales.knownNetSales,
+        unknownNetSales: sales.unknownNetSales,
+        unpricedBills: sales.unpricedBills,
+        tax: sales.tax,
+        totalCollected: sales.total,
+        cogs: sales.cogs,
+        linesWithoutCost: sales.linesWithoutCost,
+        grossProfit,
+        shopExpenses: shop.total,
+        wastageValue: sales.wastageValue,
+        wastageQty: sales.wastageQty,
+        netProfit: grossProfit - shop.total,
+        cancelledCount: sales.cancelled,
+        cancelledValue: sales.cancelledValue,
+        expensesByCategory: shop.rows,
       };
     },
 

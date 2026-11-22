@@ -16,6 +16,14 @@ export function reportsHandlers(reports: ReportsService, csv: CsvService): Handl
       handler: (input: DateRange) => reports.range(input),
     },
 
+    [CHANNELS.reportProfit]: {
+      // The owner's own numbers: cost, profit and the shop's expenses. A manager
+      // without costs:read is deliberately left out (same rule as 4.C).
+      capability: 'costs:read',
+      schema: dateRangeSchema,
+      handler: (input: DateRange) => reports.profitAndLoss(input),
+    },
+
     [CHANNELS.reportSalary]: {
       capability: 'reports:read',
       schema: monthSchema,

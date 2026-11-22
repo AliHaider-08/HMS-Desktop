@@ -232,6 +232,7 @@ async function bootstrapServices(): Promise<void> {
   });
 
   const reportsService = createReportsService({
+    expenses: expensesRepo,
     orders: ordersRepo,
     catalog: catalogRepo,
     staff: staffRepo,

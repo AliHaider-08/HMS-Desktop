@@ -26,6 +26,7 @@ const suites = [
   ['Phase 17 — recipes', 'test-phase17.mjs'],
   ['Phase 18 — deduction', 'test-phase18.mjs'],
   ['Phase 19 — expenses', 'test-phase19.mjs'],
+  ['Phase 20 — profit & loss', 'test-phase20.mjs'],
 ];
 
 const results = [];

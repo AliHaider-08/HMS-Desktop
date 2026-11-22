@@ -80,6 +80,7 @@
     },
     reports: {
       dashboard: call('reports:dashboard'),
+      profitAndLoss: call('reports:profit'),
       range: call('reports:range'),
       salarySummary: call('reports:salary'),
       deliveryReport: call('reports:delivery'),

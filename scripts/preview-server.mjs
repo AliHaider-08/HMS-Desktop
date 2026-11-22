@@ -102,6 +102,7 @@ const staffService = load('services/staffService.js').createStaffService({
       .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
 });
 const reportsService = load('services/reportsService.js').createReportsService({
+  expenses: repos.expenses,
   orders: repos.orders,
   catalog: repos.catalog,
   staff: repos.staff,

@@ -154,7 +154,7 @@ export function createExpensesRepository(db: AppDatabase) {
     : null;
 
   const selectSummary = hasExpenses
-    ? db.prepare<[string, string], ExpenseSummaryRow>(`
+    ? db.prepare<[string, string], { category_name: string; count: number; total: number }>(`
         SELECT c.name AS category_name, COUNT(*) AS count, SUM(e.amount) AS total
           FROM expenses e
           JOIN expense_categories c ON c.id = e.category_id
@@ -307,7 +307,12 @@ export function createExpensesRepository(db: AppDatabase) {
     } {
       if (!selectSummary || !selectTotal) return { rows: [], total: 0 };
       return {
-        rows: selectSummary.all(from, to),
+        // Mapped here so the renderer never sees a database column name.
+        rows: selectSummary.all(from, to).map((row) => ({
+          categoryName: row.category_name,
+          count: row.count,
+          total: row.total,
+        })),
         total: selectTotal.get(from, to)?.total ?? 0,
       };
     },
