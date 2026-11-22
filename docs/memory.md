@@ -303,6 +303,23 @@ The client's six requirements, in the app. 331 checks across 19 suites, `npm run
   silently dropped. Void keeps the row (`status='void'`, reason, who) and refunds the drawer, into
   the paying shift if still open, else into today's.
 
+- **4.F — profit & loss** (no migration, phase20, 12 checks).
+  The report the owner actually asked for: `net sales (ex tax, after discounts) − cost of
+  food = gross profit`, then `− shop expenses = net profit`. One tab on the Reports page,
+  marked "Profit & loss", opens first.
+
+### The two rules the P&L lives or dies by
+
+1. **Sales and cost are summed over the same bills.** A bill saved before its item had a
+   recipe carries no cost snapshot and can never be priced honestly afterwards. The first
+   implementation returned `cogs: null` for the whole period if *any* line was unpriced —
+   which meant that a shop that added recipes later would show "Unknown" profit forever.
+   It now splits the period: `knownNetSales` and `cogs` are a like-for-like pair (all
+   arithmetic runs on those), and `unknownNetSales` / `unpricedBills` are reported beside
+   them and explained on screen. The owner can amend an old bill to price it on purpose.
+2. **Tax is never income.** It is collected for the government; a P&L that counts it
+   would inflate every margin. It is shown on its own line and excluded from profit.
+
 ### Gotchas that cost time (do not relearn these)
 
 - **`GROUP BY` must come after `WHERE`.** Adding the cost aggregate to `ORDER_SELECT` put
@@ -314,9 +331,16 @@ The client's six requirements, in the app. 331 checks across 19 suites, `npm run
 - **The category-delete channel takes `{ id }`, not a number**, and the preview bridge must forward
   the same shape as preload.
 - **better-sqlite3 rejects mixed parameter styles** in one statement — use `@name` everywhere.
-- **`shift:x-report` takes `{ shiftId }`**, not `{ id }`; an x-report on a *closed* shift is what
+- **`shift:x-report` takes `{ shiftId }`, not `{ id }`**; an x-report on a *closed* shift is what
   the tests use to prove a closed day was not rewritten.
+- **A drawer expense must use the `expense` movement kind**, not `cash_out`: `expectedCash`
+  and the Z report subtract `expense`, so `cash_out` takes the money out but leaves the
+  report's expense line at zero.
+- **The preview server must inject the bridge on `/` too.** It used to serve
+  `dist/index.html` raw for the root path, so the preview loaded with no `window.api` and
+  the login button did nothing. Only real assets are served byte-for-byte now.
 
 ## Last Updated
 - Date: 2026-11-22
-- By: Arena Agent (Phase 4 — 4.A to 4.E)
+- By: Arena Agent (Phase 4 — 4.A to 4.E, 4.G P&L). All six client requirements delivered;
+  343 checks across 20 suites; `npm run verify` green.

@@ -255,8 +255,13 @@ Each sub-phase has its own migration, test script, `npm run verify` gate and a `
 | **4.C** | Recipes and costing | Recipe editor on Menu, `recipe_items`, cost / profit / margin columns, price helper, "Can make N", no-recipe flags, margin alerts | `018_recipes.sql` | `test-phase17.mjs` | **done** (backend + Menu UI) |
 | **4.D** | Automatic deduction | Deduct on order save, `order_item_stock` snapshot, `order_items.cost_total`, cancel rules (prepared / not prepared), amend re-valuation, negative-stock setting, per-order profit | `019_deduction.sql` | `test-phase18.mjs` | **done** |
 | **4.E** | Shop expenses | Categories, entry, drawer link, void with audit, recurring bills (4.E2), drawings (4.E2) | `020_expenses.sql` | `test-phase19.mjs` | **done** |
-| **4.F** | Wastage, adjustments, stock count | Wastage entry, stock count with variance, adjustment ledger, supplier return, wastage report | `021_stock_ops.sql` | `test-phase20.mjs` | **next** |
-| **4.G** | Profit and reports | P&L, item profitability, stock valuation, purchases, wastage, expenses, dashboard cards, CSV export | none | `test-phase21.mjs` | planned |
+| **4.F** | Wastage, adjustments, stock count | Wastage entry, stock count with variance, adjustment ledger, supplier return, wastage report | `021_stock_ops.sql` | `test-phase21.mjs` | **not started** |
+| **4.G** | Profit and reports | **P&L done** (`reports:profit`, Profit & loss tab on Reports). Still open: item profitability table, stock valuation, purchases/wastage/expense report tabs, dashboard cards, CSV | none | `test-phase20.mjs` | **partly done** |
+
+**Status: all six client requirements are delivered.** 1 stock entry (4.A), 2 recipes (4.C),
+3 automatic deduction (4.D), 4 purchase prices + history (4.B), 5 cost vs price vs profit
+(4.C + 4.G), 6 shop expenses (4.E). What remains in 4.F/4.G is reporting polish the client
+did not ask for by name.
 
 Migration numbering (authoritative): 015 inventory, 016 purchases, 017 cash↔purchase link, 018 recipes, 019 deduction, **020 expenses**, **021 stock ops**.
 
