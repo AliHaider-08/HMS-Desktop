@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   PackagePlus,
   Pencil,
+  ScrollText,
   Plus,
   Trash2,
   Truck,
@@ -30,6 +31,7 @@ import { PurchaseModal } from './PurchaseModal';
 import { SupplierModal } from './SupplierModal';
 import { VoidPurchaseModal } from './VoidPurchaseModal';
 import { PurchaseDetailModal } from './PurchaseDetailModal';
+import { IngredientDetailModal } from './IngredientDetailModal';
 
 type Tab = 'levels' | 'purchases' | 'suppliers';
 
@@ -65,6 +67,10 @@ export function StockPage() {
   const [deleteSupplier, setDeleteSupplier] = useState<Supplier | null>(null);
   const [voidTarget, setVoidTarget] = useState<Purchase | null>(null);
   const [purchaseDetail, setPurchaseDetail] = useState<Purchase | null>(null);
+  // Which ingredient's ledger/price history is open. Detail is read-only, so even
+  // a cashier may look at it (inventory:read), but the buttons that change things
+  // stay behind canWrite.
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const overview = useAsync(async () => unwrap(await getApi().stock.overview()), []);
   const suppliers = useAsync(async () => unwrap(await getApi().stock.suppliers()), []);
@@ -136,10 +142,17 @@ export function StockPage() {
       key: 'name',
       header: 'Ingredient',
       render: (ingredient) => (
-        <div>
-          <p className="font-medium text-text-primary">{ingredient.name}</p>
+        <button
+          type="button"
+          onClick={() => setDetailId(ingredient.id)}
+          className="text-left"
+          title="See its ledger, price history and recipes"
+        >
+          <p className="font-medium text-text-primary underline-offset-2 hover:underline">
+            {ingredient.name}
+          </p>
           <p className="text-caption text-text-secondary">{ingredient.category}</p>
-        </div>
+        </button>
       ),
     },
     {
@@ -217,27 +230,38 @@ export function StockPage() {
       key: 'actions',
       header: '',
       align: 'right',
-      render: (ingredient) =>
-        canWrite ? (
-          <div className="flex justify-end gap-1">
-            <button
-              type="button"
-              aria-label={`Edit ${ingredient.name}`}
-              onClick={() => setIngredientModal(ingredient)}
-              className="rounded-control p-2 text-text-secondary hover:bg-background hover:text-text-primary"
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              aria-label={`Delete ${ingredient.name}`}
-              onClick={() => setDeleteIngredient(ingredient)}
-              className="rounded-control p-2 text-text-secondary hover:bg-background hover:text-status-cancelled"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ) : null,
+      render: (ingredient) => (
+        <div className="flex justify-end gap-1">
+          <button
+            type="button"
+            aria-label={`History of ${ingredient.name}`}
+            onClick={() => setDetailId(ingredient.id)}
+            className="rounded-control p-2 text-text-secondary hover:bg-background hover:text-text-primary"
+          >
+            <ScrollText className="h-4 w-4" />
+          </button>
+          {canWrite && (
+            <>
+              <button
+                type="button"
+                aria-label={`Edit ${ingredient.name}`}
+                onClick={() => setIngredientModal(ingredient)}
+                className="rounded-control p-2 text-text-secondary hover:bg-background hover:text-text-primary"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete ${ingredient.name}`}
+                onClick={() => setDeleteIngredient(ingredient)}
+                className="rounded-control p-2 text-text-secondary hover:bg-background hover:text-status-cancelled"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -588,6 +612,10 @@ export function StockPage() {
       />
 
       <PurchaseDetailModal purchase={purchaseDetail} onClose={() => setPurchaseDetail(null)} />
+
+      {detailId !== null && (
+        <IngredientDetailModal ingredientId={detailId} onClose={() => setDetailId(null)} />
+      )}
 
       <ConfirmDialog
         isOpen={deleteIngredient !== null}
