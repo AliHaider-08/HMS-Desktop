@@ -58,6 +58,8 @@ const repos = {
   discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
   kot: load('db/repositories/kotRepository.js').createKotRepository(db),
   tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
+  inventory: load('db/repositories/inventoryRepository.js').createInventoryRepository(db),
+  recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
 };
 
 // Printing needs a real window. The preview throws so the UI reports it honestly,
@@ -77,6 +79,13 @@ const printStub = {
   renderHtml: load('services/printService.js').renderInvoiceHtml,
   renderKotHtml: load('services/printService.js').renderKotHtml,
 };
+
+const stockDeduction = load('services/stockDeductionService.js').createStockDeductionService({
+  inventory: repos.inventory,
+  orders: repos.orders,
+  recipes: repos.recipes,
+  catalog: repos.catalog,
+});
 
 const auth = load('services/authService.js').createAuthService(repos.users);
 const discountsService = load('services/discountsService.js').createDiscountsService({
@@ -113,6 +122,7 @@ const registry = buildRegistry({
     kot: repos.kot,
     tables: repos.tables,
     payments: repos.payments,
+    stock: stockDeduction,
   }),
   staff: staffService,
   vehicles: load('services/vehiclesService.js').createVehiclesService({
@@ -155,6 +165,16 @@ const registry = buildRegistry({
     orders: repos.orders,
     payments: repos.payments,
     sequences: repos.sequences,
+    settings: repos.settings,
+  }),
+  inventory: load('services/inventoryService.js').createInventoryService({
+    inventory: repos.inventory,
+    shifts: repos.shifts,
+  }),
+  recipes: load('services/recipeService.js').createRecipeService({
+    recipes: repos.recipes,
+    catalog: repos.catalog,
+    inventory: repos.inventory,
     settings: repos.settings,
   }),
 });

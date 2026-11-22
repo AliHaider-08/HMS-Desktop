@@ -135,6 +135,36 @@ const api: RendererApi = {
     restoreBackup: (filePath) => invoke(CHANNELS.backupRestore, { filePath }),
   },
 
+  stock: {
+    overview: () => invoke(CHANNELS.stockOverview),
+    ingredients: () => invoke(CHANNELS.ingredients),
+    ingredient: (id) => invoke(CHANNELS.ingredientGet, { id }),
+    saveIngredient: (input) => invoke(CHANNELS.ingredientSave, input),
+    deleteIngredient: (id) => invoke(CHANNELS.ingredientDelete, { id }),
+    starterCatalogue: () => invoke(CHANNELS.starterCatalogue),
+    loadStarterList: (input) => invoke(CHANNELS.starterLoad, input),
+    suppliers: () => invoke(CHANNELS.suppliers),
+    saveSupplier: (input) => invoke(CHANNELS.supplierSave, input),
+    deleteSupplier: (id) => invoke(CHANNELS.supplierDelete, { id }),
+    purchases: (input) => invoke(CHANNELS.purchases, input),
+    purchase: (id) => invoke(CHANNELS.purchaseGet, { id }),
+    createPurchase: (input) => invoke(CHANNELS.purchaseCreate, input),
+    voidPurchase: (input) => invoke(CHANNELS.purchaseVoid, input),
+    openingStock: (input) => invoke(CHANNELS.openingStock, input),
+    movements: (ingredientId, limit = 100) =>
+      invoke(CHANNELS.stockMovements, { ingredientId, limit }),
+  },
+
+  recipes: {
+    menuCosts: () => invoke(CHANNELS.menuCosts),
+    recipe: (itemId) => invoke(CHANNELS.recipeGet, { itemId }),
+    saveRecipe: (input) => invoke(CHANNELS.recipeSave, input),
+    suggestPrice: (input) => invoke(CHANNELS.recipeSuggestPrice, input),
+    setItemPrice: (input) => invoke(CHANNELS.recipeSetItemPrice, input),
+    stockSettings: () => invoke(CHANNELS.stockSettingsGet),
+    saveStockSettings: (input) => invoke(CHANNELS.stockSettingsSave, input),
+  },
+
   users: {
     list: () => invoke(CHANNELS.users),
     save: (input) => invoke(CHANNELS.userSave, input),

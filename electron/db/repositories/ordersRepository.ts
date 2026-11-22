@@ -40,6 +40,7 @@ interface OrderRow {
   created_at: string;
   created_by_name: string;
   printed_at: string | null;
+  cost_total: number | null;
 }
 
 interface OrderItemRow {
@@ -50,6 +51,7 @@ interface OrderItemRow {
   qty: number;
   line_total: number;
   notes: string;
+  cost_total: number | null;
 }
 
 const ORDER_SELECT = `
@@ -61,13 +63,27 @@ const ORDER_SELECT = `
          d.name AS delivery_boy_name,
          o.subtotal, o.discount, o.tax_percent, o.tax, o.total, o.notes,
          o.paid_amount, o.payment_status,
-         o.created_at, u.full_name AS created_by_name, i.printed_at
+         o.created_at, u.full_name AS created_by_name, i.printed_at,
+         CASE
+           WHEN COUNT(oi.id) = 0 THEN NULL
+           WHEN SUM(CASE WHEN oi.cost_total IS NULL THEN 1 ELSE 0 END) > 0 THEN NULL
+           ELSE SUM(oi.cost_total)
+         END AS cost_total
     FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN invoices i ON i.order_id = o.id
     LEFT JOIN waiters w ON w.id = o.waiter_id
     LEFT JOIN delivery_boys d ON d.id = o.delivery_boy_id
     JOIN users u ON u.id = o.created_by
 `;
+
+/**
+ * The aggregate needs a GROUP BY, and SQLite requires WHERE before GROUP BY.
+ * Callers therefore build: ORDER_SELECT + WHERE … + ORDER_GROUP + ORDER BY …
+ * Keeping the group clause separate is what stops "near WHERE: syntax error"
+ * when a filtered list is prepared.
+ */
+const ORDER_GROUP = 'GROUP BY o.id';
 
 const toSummary = (row: OrderRow): OrderSummary => ({
   id: row.id,
@@ -92,6 +108,11 @@ const toSummary = (row: OrderRow): OrderSummary => ({
   createdByName: row.created_by_name,
   waiterName: row.waiter_name,
   deliveryBoyName: row.delivery_boy_name,
+  costTotal: row.cost_total,
+  // Net sales after discount and EXCLUDING tax: tax is collected for the
+  // government, so counting it as the shop's income would flatter the profit.
+  profit:
+    row.cost_total === null ? null : row.subtotal - row.discount - row.cost_total,
 });
 
 const toItem = (row: OrderItemRow): OrderItemRecord => ({
@@ -102,6 +123,7 @@ const toItem = (row: OrderItemRow): OrderItemRecord => ({
   qty: row.qty,
   lineTotal: row.line_total,
   notes: row.notes,
+  costTotal: row.cost_total,
 });
 
 const toDetail = (row: OrderRow, items: OrderItemRecord[]): OrderDetail => ({
@@ -131,15 +153,48 @@ export function createOrdersRepository(db: AppDatabase) {
     )
   `);
   const insertOrderItem = db.prepare(`
-    INSERT INTO order_items (order_id, item_id, name, price, qty, line_total, notes)
-    VALUES (@orderId, @itemId, @name, @price, @qty, @lineTotal, @notes)
+    INSERT INTO order_items (order_id, item_id, name, price, qty, line_total, notes, cost_total)
+    VALUES (@orderId, @itemId, @name, @price, @qty, @lineTotal, @notes, @costTotal)
+  `);
+  const setItemCost = db.prepare('UPDATE order_items SET cost_total = ? WHERE id = ?');
+  const insertItemStock = db.prepare(`
+    INSERT INTO order_item_stock
+      (order_item_id, ingredient_id, qty_base, unit_cost_milli, cost, created_at)
+    VALUES (@orderItemId, @ingredientId, @qtyBase, @unitCostMilli, @cost, @now)
+  `);
+  const deleteItemStock = db.prepare('DELETE FROM order_item_stock WHERE order_item_id = ?');
+  const selectItemStock = db.prepare<[number], {
+    ingredient_id: number;
+    ingredient_name: string;
+    qty_base: number;
+    unit_cost_milli: number;
+    cost: number;
+  }>(`
+    SELECT s.ingredient_id, i.name AS ingredient_name, s.qty_base, s.unit_cost_milli, s.cost
+      FROM order_item_stock s
+      JOIN ingredients i ON i.id = s.ingredient_id
+     WHERE s.order_item_id = ?
+     ORDER BY i.name COLLATE NOCASE
+  `);
+  const selectOrderStock = db.prepare<[number], {
+    order_item_id: number;
+    qty_base: number;
+    unit_cost_milli: number;
+    cost: number;
+  }>(`
+    SELECT s.order_item_id, s.qty_base, s.unit_cost_milli, s.cost
+      FROM order_item_stock s
+      JOIN order_items oi ON oi.id = s.order_item_id
+     WHERE oi.order_id = ?
   `);
   const insertInvoice = db.prepare(`
     INSERT INTO invoices (invoice_no, order_id, printed_at, created_at) VALUES (?, ?, NULL, ?)
   `);
-  const selectOrderById = db.prepare<[number], OrderRow>(`${ORDER_SELECT} WHERE o.id = ?`);
+  const selectOrderById = db.prepare<[number], OrderRow>(
+    `${ORDER_SELECT} WHERE o.id = ? ${ORDER_GROUP}`,
+  );
   const selectItemsForOrder = db.prepare<[number], OrderItemRow>(
-    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE order_id = ? ORDER BY id',
+    'SELECT id, item_id, name, price, qty, line_total, notes, cost_total FROM order_items WHERE order_id = ? ORDER BY id',
   );
   const updateStatus = db.prepare(
     'UPDATE orders SET status = ?, updated_at = ?, cancelled_at = ? WHERE id = ?',
@@ -149,10 +204,10 @@ export function createOrdersRepository(db: AppDatabase) {
   /* ------------------------- merge / split (Phase 3) ------------------------- */
 
   const selectItemRows = db.prepare<[number], OrderItemRow>(
-    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE order_id = ? ORDER BY id',
+    'SELECT id, item_id, name, price, qty, line_total, notes, cost_total FROM order_items WHERE order_id = ? ORDER BY id',
   );
   const selectItemById = db.prepare<[number], OrderItemRow>(
-    'SELECT id, item_id, name, price, qty, line_total, notes FROM order_items WHERE id = ?',
+    'SELECT id, item_id, name, price, qty, line_total, notes, cost_total FROM order_items WHERE id = ?',
   );
   const deleteItem = db.prepare('DELETE FROM order_items WHERE id = ?');
   const reparentItem = db.prepare('UPDATE order_items SET order_id = ? WHERE id = ?');
@@ -296,6 +351,7 @@ export function createOrdersRepository(db: AppDatabase) {
         qty: number;
         lineTotal: number;
         notes: string;
+        costTotal?: number | null;
       }>;
     }): number {
       const run = db.transaction((payload: typeof input) => {
@@ -341,7 +397,7 @@ export function createOrdersRepository(db: AppDatabase) {
         const orderId = Number(result.lastInsertRowid);
 
         for (const item of payload.items) {
-          insertOrderItem.run({ orderId, ...item });
+          insertOrderItem.run({ orderId, ...item, costTotal: item.costTotal ?? null });
         }
 
         insertInvoice.run(payload.invoiceNo, orderId, now);
@@ -395,7 +451,7 @@ export function createOrdersRepository(db: AppDatabase) {
       }
 
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      const sql = `${ORDER_SELECT} ${where} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`;
+      const sql = `${ORDER_SELECT} ${where} ${ORDER_GROUP} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`;
       params.push(filter.limit);
 
       const rows = db.prepare(sql).all(...params) as OrderRow[];
@@ -447,9 +503,12 @@ export function createOrdersRepository(db: AppDatabase) {
         qty: number;
         lineTotal: number;
         notes: string;
+        costTotal?: number | null;
       }>,
     ): void {
-      for (const item of items) insertOrderItem.run({ orderId, ...item });
+      for (const item of items) {
+        insertOrderItem.run({ orderId, ...item, costTotal: item.costTotal ?? null });
+      }
     },
 
     /** Customer / waiter / notes on an order, leaving money alone. */
@@ -504,6 +563,66 @@ export function createOrdersRepository(db: AppDatabase) {
 
     itemCount(orderId: number): number {
       return countItems.get(orderId)?.total ?? 0;
+    },
+
+    /** Writes the frozen cost of one order line. */
+    setItemCostTotal(orderItemId: number, costTotal: number | null): void {
+      setItemCost.run(costTotal, orderItemId);
+    },
+
+    /** One snapshot row: this line used this much of this ingredient at this cost. */
+    addItemStock(input: {
+      orderItemId: number;
+      ingredientId: number;
+      qtyBase: number;
+      unitCostMilli: number;
+      cost: number;
+    }): void {
+      insertItemStock.run({ ...input, now: toSqlDateTime() });
+    },
+
+    clearItemStock(orderItemId: number): void {
+      deleteItemStock.run(orderItemId);
+    },
+
+    /**
+     * Drops the per-line link from a line's ledger rows.
+     *
+     * An amendment deletes the old lines, and `stock_movements.ref_order_item_id`
+     * must not block that. The rows themselves stay (the shelf really did move);
+     * they keep `ref_order_id`, so the history still says which bill they belong to.
+     */
+    detachItemMovementRefs(orderItemId: number): void {
+      db.prepare('UPDATE stock_movements SET ref_order_item_id = NULL WHERE ref_order_item_id = ?').run(
+        orderItemId,
+      );
+    },
+
+    /** The ingredient snapshot of one line (for the invoice screen and tests). */
+    stockForItem(orderItemId: number) {
+      return selectItemStock.all(orderItemId).map((row) => ({
+        ingredientId: row.ingredient_id,
+        ingredientName: row.ingredient_name,
+        qtyBase: row.qty_base,
+        unitCostMilli: row.unit_cost_milli,
+        cost: row.cost,
+      }));
+    },
+
+    /** Every snapshot row of an order, used when re-valuing an amended bill. */
+    stockForOrder(orderId: number) {
+      return selectOrderStock.all(orderId).map((row) => ({
+        orderItemId: row.order_item_id,
+        qtyBase: row.qty_base,
+        unitCostMilli: row.unit_cost_milli,
+        cost: row.cost,
+      }));
+    },
+
+    /** Sum of the frozen costs of an order, or null when any line lacks one. */
+    orderCostTotal(orderId: number): number | null {
+      const row = selectOrderById.get(orderId);
+      return row ? row.cost_total : null;
     },
 
     /** Marks an order as absorbed by another one. Its money stays where it is. */
@@ -669,7 +788,7 @@ export function createOrdersRepository(db: AppDatabase) {
 
     recent(limit = 8): OrderSummary[] {
       const rows = db
-        .prepare(`${ORDER_SELECT} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`)
+        .prepare(`${ORDER_SELECT} ${ORDER_GROUP} ORDER BY o.created_at DESC, o.id DESC LIMIT ?`)
         .all(limit) as OrderRow[];
       return rows.map(toSummary);
     },

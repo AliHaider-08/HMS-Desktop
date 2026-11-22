@@ -32,6 +32,11 @@ import { createKotService } from './services/kotService';
 import { createKotRepository } from './db/repositories/kotRepository';
 import { createTablesRepository } from './db/repositories/tablesRepository';
 import { createTablesService } from './services/tablesService';
+import { createInventoryRepository } from './db/repositories/inventoryRepository';
+import { createInventoryService } from './services/inventoryService';
+import { createRecipeRepository } from './db/repositories/recipeRepository';
+import { createRecipeService } from './services/recipeService';
+import { createStockDeductionService } from './services/stockDeductionService';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
@@ -116,6 +121,8 @@ async function bootstrapServices(): Promise<void> {
   const discountsRepo = createDiscountsRepository(db);
   const kotRepo = createKotRepository(db);
   const tablesRepo = createTablesRepository(db);
+  const inventoryRepo = createInventoryRepository(db);
+  const recipeRepo = createRecipeRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -128,6 +135,14 @@ async function bootstrapServices(): Promise<void> {
       sequences,
     });
   }
+
+  // One instance shared by the order service (deduct/reverse) and the tests.
+  const stockDeduction = createStockDeductionService({
+    inventory: inventoryRepo,
+    orders: ordersRepo,
+    recipes: recipeRepo,
+    catalog: catalogRepo,
+  });
 
   const auth = createAuthService(users);
 
@@ -243,6 +258,8 @@ async function bootstrapServices(): Promise<void> {
       kot: kotRepo,
       // Seats a dine-in order and enforces one open bill per table.
       tables: tablesRepo,
+      // Takes the ingredients off the shelf for every saved line (4.D).
+      stock: stockDeduction,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: vehiclesRepo, staff: staffRepo }),
@@ -261,6 +278,16 @@ async function bootstrapServices(): Promise<void> {
       orders: ordersRepo,
       payments: paymentsRepo,
       sequences,
+      settings: settingsRepo,
+    }),
+    inventory: createInventoryService({
+      inventory: inventoryRepo,
+      shifts: shiftsRepo,
+    }),
+    recipes: createRecipeService({
+      recipes: recipeRepo,
+      catalog: catalogRepo,
+      inventory: inventoryRepo,
       settings: settingsRepo,
     }),
   });

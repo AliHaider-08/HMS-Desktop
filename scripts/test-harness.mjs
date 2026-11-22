@@ -62,6 +62,8 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     discounts: load('db/repositories/discountsRepository.js').createDiscountsRepository(db),
     kot: load('db/repositories/kotRepository.js').createKotRepository(db),
     tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
+    inventory: load('db/repositories/inventoryRepository.js').createInventoryRepository(db),
+    recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -77,6 +79,13 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
   const { buildRegistry, dispatch } = load('ipc/index.js');
   const { seedDefaultAdmin } = load('db/seed.js');
   const { seedDemoData } = load('db/seedDemo.js');
+
+  const stockDeduction = load('services/stockDeductionService.js').createStockDeductionService({
+    inventory: repositories.inventory,
+    orders: repositories.orders,
+    recipes: repositories.recipes,
+    catalog: repositories.catalog,
+  });
 
   const auth = createAuthService(repositories.users);
 
@@ -156,6 +165,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
       kot: repositories.kot,
       tables: repositories.tables,
       payments: repositories.payments,
+      stock: stockDeduction,
     }),
     staff: staffService,
     vehicles: createVehiclesService({ vehicles: repositories.vehicles, staff: repositories.staff }),
@@ -184,6 +194,16 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
       orders: repositories.orders,
       payments: repositories.payments,
       sequences: repositories.sequences,
+      settings: repositories.settings,
+    }),
+    inventory: load('services/inventoryService.js').createInventoryService({
+      inventory: repositories.inventory,
+      shifts: repositories.shifts,
+    }),
+    recipes: load('services/recipeService.js').createRecipeService({
+      recipes: repositories.recipes,
+      catalog: repositories.catalog,
+      inventory: repositories.inventory,
       settings: repositories.settings,
     }),
   });

@@ -532,3 +532,159 @@ export const amendOrderSchema = z.object({
   waiterId: z.number(message).int().positive().nullable().default(null),
   notes: optionalText(300, 'Notes'),
 });
+
+/* ---------------------------- Stock (Phase 4) ---------------------------- */
+
+/** Quantities are whole base units (g / ml / pcs); a sale of 0.5 g is nonsense. */
+const quantityField = z
+  .number(message)
+  .int('Quantity must be a whole number')
+  .min(0, 'Quantity cannot be negative')
+  .max(1_000_000_000, 'Quantity is too large');
+
+export const baseUnitSchema = z.enum(['g', 'ml', 'pcs']);
+
+export const supplierSchema = z.object({
+  id: z.number().int().positive().optional(),
+  name: z.string(message).trim().min(1, 'Supplier name is required').max(80, 'Name is too long'),
+  phone: optionalText(20, 'Phone'),
+  address: optionalText(200, 'Address'),
+  notes: optionalText(300, 'Notes'),
+  active: z.boolean(message).default(true),
+});
+
+export const ingredientSchema = z.object({
+  id: z.number().int().positive().optional(),
+  name: nameField('Ingredient name'),
+  category: optionalText(40, 'Category').transform((value) => value || 'Other'),
+  baseUnit: baseUnitSchema,
+  purchaseUnit: z
+    .string(message)
+    .trim()
+    .min(1, 'Say how the supplier sells it (kg, litre, dozen…)')
+    .max(20, 'Keep the unit short'),
+  unitsPerPurchase: z
+    .number(message)
+    .int('Use a whole number of base units')
+    .min(1, 'One purchase unit must hold at least one base unit')
+    .max(1_000_000, 'That conversion is too large'),
+  reorderLevel: quantityField.default(0),
+  supplierId: z.number(message).int().positive().nullable().default(null),
+  active: z.boolean(message).default(true),
+});
+
+export const loadStarterListSchema = z.object({
+  names: z
+    .array(z.string(message).trim().min(1).max(80))
+    .min(1, 'Tick at least one ingredient')
+    .max(500, 'Choose fewer ingredients at once'),
+});
+
+/** Price per purchase unit in paisa (Rs 710/kg = 71000). */
+export const purchaseLineSchema = z.object({
+  ingredientId: idField,
+  qtyPurchaseMilli: z
+    .number(message)
+    .int('Use up to three decimal places')
+    .min(1, 'Enter a quantity')
+    .max(100_000_000_000, 'That quantity is too large'),
+  unitPrice: paisaField,
+});
+
+export const purchaseSchema = z
+  .object({
+    supplierId: z.number(message).int().positive().nullable().default(null),
+    billNo: optionalText(40, 'Bill number'),
+    purchasedOn: z
+      .string(message)
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose the purchase date'),
+    extraCharges: paisaField.default(0),
+    paidAmount: paisaField.default(0),
+    paymentMethod: z.enum(['cash', 'card', 'jazzcash', 'easypaisa', 'bank_transfer', 'credit']),
+    notes: optionalText(300, 'Notes'),
+    lines: z.array(purchaseLineSchema).min(1, 'Add at least one ingredient').max(100),
+  })
+  // The same ingredient twice in one purchase makes the average cost ambiguous to
+  // read; one line per ingredient keeps the price history honest.
+  .refine(
+    (values) => new Set(values.lines.map((line) => line.ingredientId)).size === values.lines.length,
+    { message: 'The same ingredient is on two lines', path: ['lines'] },
+  );
+
+export const purchaseFilterSchema = z.object({
+  fromDate: z.string(message).regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a start date'),
+  toDate: z.string(message).regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose an end date'),
+  limit: z.number(message).int().min(1).max(500).default(100),
+});
+
+export const voidPurchaseSchema = z.object({
+  id: idField,
+  reason: z
+    .string(message)
+    .trim()
+    .min(3, 'Say why this purchase is being voided')
+    .max(200, 'Keep the reason short'),
+});
+
+export const openingStockSchema = z.object({
+  lines: z
+    .array(
+      z.object({
+        ingredientId: idField,
+        qtyBase: z.number(message).int().min(0).max(1_000_000_000),
+        unitCostMilli: z.number(message).int().min(0).max(1_000_000_000_000),
+      }),
+    )
+    .min(1, 'Enter at least one quantity')
+    .max(500),
+});
+
+/* --------------------------- Recipes (4.C) --------------------------- */
+
+export const recipeSchema = z
+  .object({
+    itemId: idField,
+    lines: z
+      .array(
+        z.object({
+          ingredientId: idField,
+          // Whole base units: 150 g of chicken is 150, never 0.15.
+          qtyBase: z
+            .number(message)
+            .int('Use whole grams, ml or pieces')
+            .min(1, 'A quantity must be at least 1')
+            .max(1_000_000, 'That quantity is too large'),
+          wastePercentX100: z
+            .number(message)
+            .int()
+            .min(0, 'Waste cannot be negative')
+            .max(5_000, 'Waste above 50% is not believable')
+            .default(0),
+        }),
+      )
+      .max(100, 'That recipe has too many lines'),
+  })
+  .refine(
+    (values) =>
+      new Set(values.lines.map((line) => line.ingredientId)).size === values.lines.length,
+    { message: 'The same ingredient is on two lines', path: ['lines'] },
+  );
+
+export const priceSuggestionSchema = z.object({
+  marginPercentX100: z
+    .number(message)
+    .int()
+    .min(0, 'The margin cannot be negative')
+    .max(9_999, 'The margin must be below 100%'),
+  costTotal: z.number(message).int().min(0).max(1_000_000_000),
+});
+
+export const stockSettingsSchema = z.object({
+  allowNegativeStock: z.boolean(message).default(true),
+  autoSoldOut: z.boolean(message).default(false),
+  marginAlertPercentX100: z
+    .number(message)
+    .int('Use a whole percent')
+    .min(0, 'The margin cannot be negative')
+    .max(9_900, 'The margin must be below 100%'),
+});

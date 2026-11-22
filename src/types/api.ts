@@ -23,7 +23,10 @@ export type PageKey =
   // Phase 2 (3.B) — day close.
   | 'shifts'
   // Phase 3 — dine-in floor plan, merging and splitting bills.
-  | 'tables';
+  | 'tables'
+  // Roadmap Phase 4 — stock, recipes, costing, shop expenses.
+  | 'stock'
+  | 'expenses';
 
 /** Fine grained write permissions, so a cashier can open the menu but not edit it. */
 export type Capability =
@@ -49,7 +52,19 @@ export type Capability =
   | 'discount:approve'
   | 'kot:print'
   // Editing the floor plan, merging bills and splitting them.
-  | 'tables:write';
+  | 'tables:write'
+  // Phase 4.A/4.B — stock, recipes, purchases and shop expenses.
+  | 'inventory:read'
+  | 'inventory:write'
+  | 'purchases:write'
+  | 'purchases:void'
+  | 'stock:adjust'
+  | 'recipes:write'
+  | 'expenses:read'
+  | 'expenses:write'
+  | 'expenses:void'
+  // The owner's private numbers: cost, margin and profit.
+  | 'costs:read';
 
 export interface RolePermissions {
   role: UserRole;
@@ -241,6 +256,8 @@ export interface CashMovement {
   amount: number;
   reason: string;
   refOrderId: number | null;
+  /** Set when the money moved because of a stock purchase (4.B). */
+  refPurchaseId: number | null;
   createdBy: number;
   createdByName: string;
   createdAt: string;
@@ -256,7 +273,10 @@ export interface ShiftReport {
   cashIn: number;
   cashOut: number;
   refunds: number;
+  /** Purchases paid from the drawer during this shift. */
   expenses: number;
+  /** Cash returned to the drawer by void purchases (already netted out of the two figures above). */
+  purchaseReversals: number;
   discountTotal: number;
   cancelledCount: number;
   cancelledValue: number;
@@ -313,6 +333,8 @@ export interface OrderItemRecord {
   qty: number;
   lineTotal: number;
   notes: string;
+  /** What the line cost to make, frozen at sale time. Null = no cost data (old bill or no recipe). */
+  costTotal: number | null;
 }
 
 export interface NewOrderInput {
@@ -364,6 +386,10 @@ export interface OrderSummary {
   createdByName: string;
   waiterName: string | null;
   deliveryBoyName: string | null;
+  /** Sum of the frozen line costs. Null when any line has no cost data. */
+  costTotal: number | null;
+  /** Net sales (after discount, ex-tax) minus costTotal. Null when cost is unknown. */
+  profit: number | null;
 }
 
 export interface OrderDetail extends OrderSummary {
@@ -734,6 +760,327 @@ export interface ReportBundle {
 }
 
 /* ------------------------------------------------------------------ */
+/* Stock: ingredients, suppliers and purchases (Roadmap 4.A / 4.B)     */
+/* ------------------------------------------------------------------ */
+
+/** The smallest unit the app counts an ingredient in. Quantities are integers. */
+export type BaseUnit = 'g' | 'ml' | 'pcs';
+
+/**
+ * Unit cost precision. A gram of chicken costs about 70 paisa, but a gram of salt
+ * costs a fraction of one, so unit costs are stored as MILLI-PAISA per base unit
+ * (paisa × 1000). Values at a paisa boundary round once, when they are written.
+ */
+export const MILLI_PAISA = 1000;
+
+export type StockMovementKind =
+  | 'opening'
+  | 'purchase'
+  | 'purchase_void'
+  | 'sale'
+  | 'sale_reversal'
+  | 'wastage'
+  | 'adjustment'
+  | 'supplier_return'
+  | 'stock_count';
+
+export type PurchaseStatus = 'posted' | 'void';
+
+export interface Supplier {
+  id: number;
+  name: string;
+  phone: string;
+  address: string;
+  notes: string;
+  active: boolean;
+  /** Credit purchases minus what has been paid to this supplier. */
+  balance: number;
+}
+
+export interface SupplierInput {
+  id?: number;
+  name: string;
+  phone: string;
+  address: string;
+  notes: string;
+  active: boolean;
+}
+
+export interface Ingredient {
+  id: number;
+  name: string;
+  category: string;
+  baseUnit: BaseUnit;
+  /** What the supplier sells in: kg, litre, dozen, packet… free text. */
+  purchaseUnit: string;
+  /** How many base units one purchase unit holds (1 kg = 1000 g). */
+  unitsPerPurchase: number;
+  /** Low-stock alert level, in base units. */
+  reorderLevel: number;
+  /** Cached total of the stock ledger. Never edited by a screen. */
+  qtyOnHand: number;
+  /** Moving weighted average, milli-paisa per base unit. */
+  avgCostMilli: number;
+  /** Price of the most recent posted purchase, milli-paisa per base unit. */
+  lastCostMilli: number;
+  supplierId: number | null;
+  supplierName: string | null;
+  active: boolean;
+  /** qtyOnHand × avgCostMilli rounded to paisa. */
+  stockValue: number;
+  lowStock: boolean;
+  /** Used by at least one recipe, so it cannot be deleted, only deactivated. */
+  usedInRecipes: number;
+}
+
+export interface IngredientInput {
+  id?: number;
+  name: string;
+  category: string;
+  baseUnit: BaseUnit;
+  purchaseUnit: string;
+  unitsPerPurchase: number;
+  reorderLevel: number;
+  supplierId: number | null;
+  active: boolean;
+}
+
+/** One row of the starter catalogue the owner can load on first use. */
+export interface StarterIngredient {
+  name: string;
+  category: string;
+  baseUnit: BaseUnit;
+  purchaseUnit: string;
+  unitsPerPurchase: number;
+  /** Suggested low-stock level in base units; the owner can change it after loading. */
+  reorderLevel: number;
+}
+
+export interface StarterCatalogueGroup {
+  category: string;
+  /** Items inherit the group's category, so it is not repeated on every row. */
+  items: Array<Omit<StarterIngredient, 'category'>>;
+}
+
+export interface LoadStarterListInput {
+  /** Names chosen by the owner. Names already in the list are skipped. */
+  names: string[];
+}
+
+export interface LoadStarterListResult {
+  created: number;
+  skipped: number;
+}
+
+export interface StockOverview {
+  ingredients: Ingredient[];
+  totalValue: number;
+  lowStockCount: number;
+  outOfStockCount: number;
+  ingredientCount: number;
+}
+
+export interface PurchaseLine {
+  id: number;
+  purchaseId: number;
+  ingredientId: number;
+  ingredientName: string;
+  baseUnit: BaseUnit;
+  /** Quantity in the purchase unit, ×1000 (2.5 kg = 2500). */
+  qtyPurchaseMilli: number;
+  /** Quantity converted to base units. */
+  qtyBase: number;
+  /** Price per purchase unit, in paisa (Rs 710/kg = 71,000). */
+  unitPrice: number;
+  /** Landed unit cost in milli-paisa per base unit, after extra charges. */
+  landedCostMilli: number;
+  lineTotal: number;
+}
+
+export interface PurchaseLineInput {
+  ingredientId: number;
+  /** Quantity in the purchase unit, ×1000 so 2.5 kg is 2500. */
+  qtyPurchaseMilli: number;
+  unitPrice: number;
+}
+
+export interface Purchase {
+  id: number;
+  purchaseNo: string;
+  supplierId: number | null;
+  supplierName: string | null;
+  billNo: string;
+  purchasedOn: string;
+  subtotal: number;
+  extraCharges: number;
+  total: number;
+  paidAmount: number;
+  paymentMethod: PaymentMethod;
+  status: PurchaseStatus;
+  voidReason: string;
+  voidedAt: string | null;
+  notes: string;
+  createdByName: string;
+  createdAt: string;
+  lines: PurchaseLine[];
+}
+
+export interface NewPurchaseInput {
+  supplierId: number | null;
+  billNo: string;
+  purchasedOn: string;
+  extraCharges: number;
+  paidAmount: number;
+  paymentMethod: PaymentMethod;
+  notes: string;
+  lines: PurchaseLineInput[];
+}
+
+/** Opening stock: what is on the shelf on go-live day, at what cost. */
+export interface OpeningStockInput {
+  lines: Array<{ ingredientId: number; qtyBase: number; unitCostMilli: number }>;
+}
+
+export interface StockMovement {
+  id: number;
+  ingredientId: number;
+  kind: StockMovementKind;
+  /** Signed: positive adds stock, negative removes it. */
+  qty: number;
+  unitCostMilli: number;
+  /** paisa value of the movement (qty × unit cost). */
+  value: number;
+  reason: string;
+  refPurchaseId: number | null;
+  refOrderId: number | null;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface IngredientDetail {
+  ingredient: Ingredient;
+  movements: StockMovement[];
+  /** Purchases of this ingredient, newest first — the price history. */
+  priceHistory: Array<{
+    purchasedOn: string;
+    supplierName: string | null;
+    purchaseNo: string;
+    qtyPurchaseMilli: number;
+    purchaseUnit: string;
+    unitPrice: number;
+    landedCostMilli: number;
+  }>;
+  usedInItems: Array<{ itemId: number; itemName: string; qtyBase: number }>;
+}
+
+export interface StockApi {
+  overview(): Promise<ApiResult<StockOverview>>;
+  ingredients(): Promise<ApiResult<Ingredient[]>>;
+  ingredient(input: { id: number }): Promise<ApiResult<IngredientDetail>>;
+  saveIngredient(input: IngredientInput): Promise<ApiResult<Ingredient>>;
+  deleteIngredient(id: number): Promise<ApiResult<null>>;
+  starterCatalogue(): Promise<ApiResult<StarterCatalogueGroup[]>>;
+  loadStarterList(input: LoadStarterListInput): Promise<ApiResult<LoadStarterListResult>>;
+  suppliers(): Promise<ApiResult<Supplier[]>>;
+  saveSupplier(input: SupplierInput): Promise<ApiResult<Supplier>>;
+  deleteSupplier(id: number): Promise<ApiResult<null>>;
+  purchases(input: { fromDate: string; toDate: string; limit: number }): Promise<ApiResult<Purchase[]>>;
+  purchase(input: { id: number }): Promise<ApiResult<Purchase>>;
+  createPurchase(input: NewPurchaseInput): Promise<ApiResult<Purchase>>;
+  voidPurchase(input: { id: number; reason: string }): Promise<ApiResult<Purchase>>;
+  openingStock(input: OpeningStockInput): Promise<ApiResult<{ applied: number }>>;
+  movements(input: { ingredientId: number; limit: number }): Promise<ApiResult<StockMovement[]>>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Recipes and costing (Roadmap 4.C)                                   */
+/* ------------------------------------------------------------------ */
+
+export interface RecipeLine {
+  id: number;
+  ingredientId: number;
+  ingredientName: string;
+  baseUnit: BaseUnit;
+  /** Quantity per one serving, in the ingredient's base unit. */
+  qtyBase: number;
+  /** Trim/cooking-loss allowance, percent ×100 (5% = 500). */
+  wastePercentX100: number;
+  /** Current average cost of the line, milli-paisa per base unit. */
+  unitCostMilli: number;
+  /** qty × unit cost, rounded to paisa. */
+  lineCost: number;
+}
+
+export interface Recipe {
+  itemId: number;
+  itemName: string;
+  /** Selling price the owner chose, integer paisa. */
+  price: number;
+  lines: RecipeLine[];
+  /** Sum of the lines, in paisa. 0 when there are no lines. */
+  costTotal: number;
+  /** price − costTotal. Null when there is no recipe (cost unknown, never zero). */
+  profit: number | null;
+  /** profit ÷ price, percent ×100 (5870 = 58.70%). Null without a recipe. */
+  marginPercentX100: number | null;
+  /** Recipe exists? False means "cost unknown", not "free". */
+  hasRecipe: boolean;
+}
+
+export interface MenuCostRow {
+  itemId: number;
+  itemName: string;
+  categoryName: string;
+  price: number;
+  costTotal: number;
+  profit: number | null;
+  marginPercentX100: number | null;
+  hasRecipe: boolean;
+  /** Smallest stock ÷ recipe quantity across the lines; null without a recipe. */
+  canMake: number | null;
+  /** Below the margin floor in settings. */
+  belowTarget: boolean;
+}
+
+export interface MenuCostOverview {
+  rows: MenuCostRow[];
+  marginAlertPercent: number;
+  missingRecipeCount: number;
+  belowTargetCount: number;
+}
+
+export interface SaveRecipeInput {
+  itemId: number;
+  lines: Array<{ ingredientId: number; qtyBase: number; wastePercentX100: number }>;
+}
+
+export interface PriceSuggestionInput {
+  /** Target margin, percent ×100 (5500 = 55%). */
+  marginPercentX100: number;
+  /** Cost of one serving in paisa. */
+  costTotal: number;
+}
+
+export interface RecipeApi {
+  menuCosts(): Promise<ApiResult<MenuCostOverview>>;
+  recipe(itemId: number): Promise<ApiResult<Recipe>>;
+  saveRecipe(input: SaveRecipeInput): Promise<ApiResult<Recipe>>;
+  suggestPrice(input: PriceSuggestionInput): Promise<ApiResult<{ price: number }>>;
+  setItemPrice(input: { itemId: number; price: number }): Promise<ApiResult<MenuCostRow>>;
+  stockSettings(): Promise<ApiResult<StockSettings>>;
+  saveStockSettings(input: StockSettings): Promise<ApiResult<StockSettings>>;
+}
+
+export interface StockSettings {
+  /** Sell below zero stock (true) or block the sale (false). */
+  allowNegativeStock: boolean;
+  /** Mark items sold out automatically when they cannot be made. */
+  autoSoldOut: boolean;
+  /** Margin floor, percent ×100. Items below it are flagged. */
+  marginAlertPercentX100: number;
+}
+
+/* ------------------------------------------------------------------ */
 /* Settings and users                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -992,6 +1339,8 @@ export interface RendererApi {
   discounts: DiscountsApi;
   kot: KotApi;
   tables: TablesApi;
+  stock: StockApi;
+  recipes: RecipeApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -1100,6 +1449,33 @@ export const CHANNELS = {
   userSave: 'users:save',
   userActive: 'users:set-active',
   userPassword: 'users:reset-password',
+
+  // Stock, purchases and recipes (Roadmap Phase 4)
+  stockOverview: 'stock:overview',
+  ingredients: 'stock:ingredients',
+  ingredientGet: 'stock:ingredient',
+  ingredientSave: 'stock:ingredient-save',
+  ingredientDelete: 'stock:ingredient-delete',
+  starterCatalogue: 'stock:starter-catalogue',
+  starterLoad: 'stock:starter-load',
+  suppliers: 'stock:suppliers',
+  supplierSave: 'stock:supplier-save',
+  supplierDelete: 'stock:supplier-delete',
+  purchases: 'stock:purchases',
+  purchaseGet: 'stock:purchase',
+  purchaseCreate: 'stock:purchase-create',
+  purchaseVoid: 'stock:purchase-void',
+  openingStock: 'stock:opening',
+  stockMovements: 'stock:movements',
+
+  // Recipes and costing (4.C)
+  menuCosts: 'recipes:menu-costs',
+  recipeGet: 'recipes:get',
+  recipeSave: 'recipes:save',
+  recipeSuggestPrice: 'recipes:suggest-price',
+  recipeSetItemPrice: 'recipes:set-item-price',
+  stockSettingsGet: 'stock:settings',
+  stockSettingsSave: 'stock:settings-save',
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];

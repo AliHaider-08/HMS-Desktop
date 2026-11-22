@@ -20,6 +20,8 @@ const PAGE_LABELS: Record<PageKey, string> = {
   reports: 'Reports',
   users: 'Users',
   settings: 'Settings',
+  stock: 'Stock',
+  expenses: 'Expenses',
 };
 
 /** Shown by the route guard when a signed-in user opens a page their role lacks. */
