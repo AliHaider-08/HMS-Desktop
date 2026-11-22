@@ -36,6 +36,7 @@ import { createInventoryRepository } from './db/repositories/inventoryRepository
 import { createInventoryService } from './services/inventoryService';
 import { createRecipeRepository } from './db/repositories/recipeRepository';
 import { createExpensesRepository } from './db/repositories/expensesRepository';
+import { createStockOpsRepository } from './db/repositories/stockOpsRepository';
 import { createRecipeService } from './services/recipeService';
 import { createStockDeductionService } from './services/stockDeductionService';
 import { createExpensesService } from './services/expensesService';
@@ -126,6 +127,7 @@ async function bootstrapServices(): Promise<void> {
   const inventoryRepo = createInventoryRepository(db);
   const recipeRepo = createRecipeRepository(db);
   const expensesRepo = createExpensesRepository(db);
+  const stockOpsRepo = createStockOpsRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -287,6 +289,7 @@ async function bootstrapServices(): Promise<void> {
     inventory: createInventoryService({
       inventory: inventoryRepo,
       shifts: shiftsRepo,
+      stockOps: stockOpsRepo,
     }),
     expenses: createExpensesService({ expenses: expensesRepo, shifts: shiftsRepo }),
     recipes: createRecipeService({

@@ -732,3 +732,60 @@ export const expenseListSchema = z.object({
   to: dateField,
   status: z.enum(['active', 'void', 'all']).default('active'),
 });
+
+/* ---------------------- wastage, adjustments, counts (4.F) ------------------- */
+
+export const wastageSchema = z.object({
+  ingredientId: idField,
+  qtyBase: z
+    .number(message)
+    .int('Use a whole number of base units')
+    .min(1, 'The quantity must be more than zero')
+    .max(100_000_000, 'That quantity is too large'),
+  reason: z.enum(['spoiled', 'dropped', 'expired', 'staff_meal', 'test', 'other'], message),
+  notes: optionalText(200, 'Notes'),
+  happenedOn: dateField,
+});
+
+export const adjustmentSchema = z.object({
+  ingredientId: idField,
+  qtyBase: z
+    .number(message)
+    .int('Use a whole number of base units')
+    .refine((value) => value !== 0, 'The quantity cannot be zero')
+    .refine(
+      (value) => Math.abs(value) <= 100_000_000,
+      'That quantity is too large',
+    ),
+  reason: z
+    .string(message)
+    .trim()
+    .min(3, 'Say why the stock is being corrected')
+    .max(200, 'Reason is too long'),
+});
+
+export const countLineSchema = z.object({
+  ingredientId: idField,
+  countedQty: z
+    .number(message)
+    .int('Count in whole base units')
+    .min(0, 'A counted quantity cannot be negative')
+    .max(100_000_000, 'That quantity is too large'),
+});
+
+export const stockCountSchema = z
+  .object({
+    countedOn: dateField,
+    notes: optionalText(300, 'Notes'),
+    lines: z
+      .array(countLineSchema)
+      .min(1, 'Count at least one ingredient')
+      .max(500, 'That is too many lines for one count'),
+  })
+  .refine(
+    (values) =>
+      new Set(values.lines.map((line) => line.ingredientId)).size === values.lines.length,
+    { message: 'The same ingredient is on two lines', path: ['lines'] },
+  );
+
+export const stockReportRangeSchema = z.object({ fromDate: dateField, toDate: dateField });

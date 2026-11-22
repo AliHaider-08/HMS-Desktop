@@ -1,4 +1,6 @@
 import type {
+  AdjustmentInput,
+  CountLineInput,
   Ingredient,
   IngredientDetail,
   IngredientInput,
@@ -9,12 +11,19 @@ import type {
   StarterCatalogueGroup,
   StockMovement,
   StockOverview,
+  StockCount,
+  StockCountDetail,
+  StockCountInput,
   Supplier,
   SupplierInput,
+  WastageInput,
+  WastageOverview,
 } from '../../src/types/api';
 import type { InventoryRepository } from '../db/repositories/inventoryRepository';
 import { nextAverageCost } from '../db/repositories/inventoryRepository';
 import type { ShiftsRepository } from '../db/repositories/shiftsRepository';
+import type { StockOpsRepository } from '../db/repositories/stockOpsRepository';
+import { toSqlDate } from '../utils/datetime';
 import { AppError } from '../utils/errors';
 import { flattenStarterCatalogue, STARTER_CATALOGUE } from './starterCatalogue';
 import { logInfo } from './logger';
@@ -27,11 +36,23 @@ import { logInfo } from './logger';
  * `qty_on_hand` directly except `setIngredientTotals`, which is only used by the
  * opening-stock path after the movements have been written.
  */
+/** The ledger's `reason` when the owner does not type anything. */
+const WASTAGE_TEXT: Record<string, string> = {
+  spoiled: 'Spoiled',
+  dropped: 'Dropped or spilled',
+  expired: 'Expired',
+  staff_meal: 'Staff meal',
+  test: 'Test batch',
+  other: 'Wastage',
+};
+
 export function createInventoryService(deps: {
   inventory: InventoryRepository;
   shifts: ShiftsRepository;
+  /** Counts and the wastage report (4.F). Optional so an older harness still works. */
+  stockOps?: StockOpsRepository;
 }) {
-  const { inventory, shifts } = deps;
+  const { inventory, shifts, stockOps } = deps;
 
   function ingredientOrFail(id: number): Ingredient {
     const ingredient = inventory.findIngredient(id);
@@ -521,6 +542,223 @@ export function createInventoryService(deps: {
     movements(input: { ingredientId: number; limit: number }): StockMovement[] {
       ingredientOrFail(input.ingredientId);
       return inventory.movementsFor(input.ingredientId, input.limit);
+    },
+
+    /* ------------------- wastage, adjustments, counts (4.F) ------------------- */
+
+    /**
+     * Throws stock away and records why.
+     *
+     * The loss is valued at the ingredient's current average cost and written as a
+     * `wastage` movement, so it leaves the shelf the same way a sale does and lands
+     * in the P&L as a real cost. The quantity is taken POSITIVE from the caller and
+     * negated here: "I threw away 500 g" is how a person thinks, and a sign error in
+     * a wastage entry would silently add stock.
+     */
+    recordWastage(input: WastageInput, createdBy: number): StockMovement {
+      const ingredient = ingredientOrFail(input.ingredientId);
+
+      if (!Number.isInteger(input.qtyBase) || input.qtyBase <= 0) {
+        throw new AppError('VALIDATION_ERROR', 'The quantity must be a whole number above zero');
+      }
+      if (input.qtyBase > ingredient.qtyOnHand) {
+        throw new AppError(
+          'CONFLICT',
+          `Only ${ingredient.qtyOnHand} in stock, so ${input.qtyBase} cannot be wasted. Use a stock count if the shelf is wrong.`,
+        );
+      }
+
+      const happenedOn = input.happenedOn || toSqlDate();
+      if (happenedOn > toSqlDate()) {
+        throw new AppError('VALIDATION_ERROR', 'Wastage cannot be dated in the future');
+      }
+
+      inventory.applyMovement({
+        ingredientId: ingredient.id,
+        kind: 'wastage',
+        qty: -input.qtyBase,
+        unitCostMilli: ingredient.avgCostMilli,
+        reason: input.notes.trim() || WASTAGE_TEXT[input.reason] || 'Wastage',
+        wastageReason: input.reason,
+        createdBy,
+      });
+
+      logInfo(
+        `Wastage: ${input.qtyBase} ${ingredient.baseUnit} of ${ingredient.name} (${input.reason})`,
+      );
+
+      // The ledger row is the answer; read it back so the caller sees what was written.
+      const movements = inventory.movementsFor(ingredient.id, 1);
+      const written = movements[0];
+      if (!written) throw new AppError('INTERNAL_ERROR', 'The wastage could not be recorded');
+      return written;
+    },
+
+    /**
+     * A signed correction with a reason, for when the shelf is wrong but nobody
+     * counted it: a delivery short by two boxes, a bag split in the store room.
+     *
+     * Deliberately NOT a stock count. A count says "I counted 47 and the book says
+     * 50"; an adjustment says "I know exactly what happened". The audit trail keeps
+     * them apart so the variance report is not polluted by explained corrections.
+     */
+    adjust(input: AdjustmentInput, createdBy: number): StockMovement {
+      const ingredient = ingredientOrFail(input.ingredientId);
+
+      if (!Number.isInteger(input.qtyBase) || input.qtyBase === 0) {
+        throw new AppError('VALIDATION_ERROR', 'The quantity must be a whole number, not zero');
+      }
+      if (input.reason.trim().length < 3) {
+        throw new AppError('VALIDATION_ERROR', 'Say why the stock is being corrected');
+      }
+      if (input.qtyBase < 0 && Math.abs(input.qtyBase) > ingredient.qtyOnHand) {
+        throw new AppError(
+          'CONFLICT',
+          `Only ${ingredient.qtyOnHand} in stock, so ${Math.abs(input.qtyBase)} cannot be removed.`,
+        );
+      }
+
+      inventory.applyMovement({
+        ingredientId: ingredient.id,
+        kind: 'adjustment',
+        qty: input.qtyBase,
+        unitCostMilli: ingredient.avgCostMilli,
+        reason: input.reason.trim(),
+        createdBy,
+      });
+
+      logInfo(
+        `Adjustment: ${input.qtyBase} ${ingredient.baseUnit} of ${ingredient.name} (${input.reason})`,
+      );
+
+      const movements = inventory.movementsFor(ingredient.id, 1);
+      const written = movements[0];
+      if (!written) throw new AppError('INTERNAL_ERROR', 'The adjustment could not be recorded');
+      return written;
+    },
+
+    wastageReport(input: { fromDate: string; toDate: string }): WastageOverview {
+      if (!stockOps) {
+        throw new AppError(
+          'CONFLICT',
+          'The wastage report is not available in this database yet. Restart the app.',
+        );
+      }
+
+      const report = stockOps.wastageReport(input.fromDate, input.toDate);
+      return {
+        from: input.fromDate,
+        to: input.toDate,
+        rows: report.rows,
+        total: report.total,
+        qty: report.qty,
+      };
+    },
+
+    /**
+     * Applies a stock count: the shelf is SET to the counted number, and the
+     * difference is written as one `stock_count` movement per ingredient.
+     *
+     * Setting rather than adding is the point — the owner counted what is there,
+     * so the book must agree with him afterwards. Lines where book and count agree
+     * produce no movement (a row of zeros in the ledger is noise) but the count
+     * still records them, so "I checked and it was right" is provable.
+     */
+    saveCount(input: StockCountInput, createdBy: number): StockCountDetail {
+      if (!stockOps) {
+        throw new AppError(
+          'CONFLICT',
+          'Stock counts are not available in this database yet. Restart the app.',
+        );
+      }
+
+      const countedOn = input.countedOn || toSqlDate();
+      if (countedOn > toSqlDate()) {
+        throw new AppError('VALIDATION_ERROR', 'A count cannot be dated in the future');
+      }
+      if (input.lines.length === 0) {
+        throw new AppError('VALIDATION_ERROR', 'Count at least one ingredient');
+      }
+
+      const seen = new Set<number>();
+      for (const line of input.lines) {
+        if (seen.has(line.ingredientId)) {
+          throw new AppError('VALIDATION_ERROR', 'The same ingredient is on two lines');
+        }
+        seen.add(line.ingredientId);
+
+        if (!Number.isInteger(line.countedQty) || line.countedQty < 0) {
+          throw new AppError('VALIDATION_ERROR', 'A counted quantity cannot be negative');
+        }
+      }
+
+      const prepared = input.lines.map((line: CountLineInput) => {
+        const ingredient = ingredientOrFail(line.ingredientId);
+        const variance = line.countedQty - ingredient.qtyOnHand;
+
+        return {
+          ingredient,
+          countedQty: line.countedQty,
+          variance,
+          unitCostMilli: ingredient.avgCostMilli,
+          varianceValue: Math.round((Math.abs(variance) * ingredient.avgCostMilli) / 1000),
+        };
+      });
+
+      const varianceValue = prepared.reduce((total, line) => total + line.varianceValue, 0);
+      const countNo = stockOps.nextCountNo();
+
+      const countId = stockOps.transaction(() => {
+        const id = stockOps.createCount({
+          countNo,
+          countedOn,
+          varianceValue,
+          notes: input.notes.trim(),
+          createdBy,
+          lines: prepared.map((line) => ({
+            ingredientId: line.ingredient.id,
+            bookQty: line.ingredient.qtyOnHand,
+            countedQty: line.countedQty,
+            variance: line.variance,
+            unitCostMilli: line.unitCostMilli,
+            varianceValue: line.varianceValue,
+          })),
+        });
+
+        for (const line of prepared) {
+          if (line.variance === 0) continue;
+
+          inventory.applyMovement({
+            ingredientId: line.ingredient.id,
+            kind: 'stock_count',
+            qty: line.variance,
+            unitCostMilli: line.unitCostMilli,
+            reason: `Stock count ${countNo}`,
+            createdBy,
+          });
+        }
+
+        return id;
+      });
+
+      logInfo(`Stock count ${countNo}: ${prepared.length} line(s), variance ${varianceValue} paisa`);
+
+      const detail = stockOps.findCount(countId);
+      if (!detail) throw new AppError('INTERNAL_ERROR', 'The count could not be read back');
+      return detail;
+    },
+
+    counts(): StockCount[] {
+      return stockOps?.listCounts() ?? [];
+    },
+
+    count(id: number): StockCountDetail {
+      if (!stockOps) {
+        throw new AppError('CONFLICT', 'Stock counts are not available in this database yet.');
+      }
+      const detail = stockOps.findCount(id);
+      if (!detail) throw new AppError('NOT_FOUND', 'That stock count does not exist');
+      return detail;
     },
 
     /** Exposed for the recipe service (Roadmap 4.C) and its tests. */

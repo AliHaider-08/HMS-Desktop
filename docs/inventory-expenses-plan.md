@@ -255,19 +255,48 @@ Each sub-phase has its own migration, test script, `npm run verify` gate and a `
 | **4.C** | Recipes and costing | Recipe editor on Menu, `recipe_items`, cost / profit / margin columns, price helper, "Can make N", no-recipe flags, margin alerts | `018_recipes.sql` | `test-phase17.mjs` | **done** (backend + Menu UI) |
 | **4.D** | Automatic deduction | Deduct on order save, `order_item_stock` snapshot, `order_items.cost_total`, cancel rules (prepared / not prepared), amend re-valuation, negative-stock setting, per-order profit | `019_deduction.sql` | `test-phase18.mjs` | **done** |
 | **4.E** | Shop expenses | Categories, entry, drawer link, void with audit, recurring bills (4.E2), drawings (4.E2) | `020_expenses.sql` | `test-phase19.mjs` | **done** |
-| **4.F** | Wastage, adjustments, stock count | Wastage entry, stock count with variance, adjustment ledger, supplier return, wastage report | `021_stock_ops.sql` | `test-phase21.mjs` | **not started** |
+| **4.F** | Wastage, adjustments, stock count | Wastage entry (reason codes + notes + dated at average cost), stock count with frozen variance (the shelf is SET to the counted qty), adjustment ledger, supplier return via the existing `supplier_return` kind, wastage report by ingredient+reason, Wastage + Stock counts tabs | `021_stock_ops.sql` | `test-phase21.mjs` | **done** (15 checks) |
 | **4.G** | Profit and reports | **P&L done** (`reports:profit`, Profit & loss tab on Reports). Still open: item profitability table, stock valuation, purchases/wastage/expense report tabs, dashboard cards, CSV | none | `test-phase20.mjs` | **partly done** |
 
 **Status: all six client requirements are delivered.** 1 stock entry (4.A), 2 recipes (4.C),
 3 automatic deduction (4.D), 4 purchase prices + history (4.B), 5 cost vs price vs profit
-(4.C + 4.G), 6 shop expenses (4.E). What remains in 4.F/4.G is reporting polish the client
-did not ask for by name.
+(4.C + 4.G), 6 shop expenses (4.E). 4.F is finished too (wastage, adjustments, counts), so
+what remains is the non-P&L half of 4.G: item profitability, stock valuation, report tabs,
+dashboard cards and CSV export.
 
 Migration numbering (authoritative): 015 inventory, 016 purchases, 017 cash↔purchase link, 018 recipes, 019 deduction, **020 expenses**, **021 stock ops**.
 
 Scope note: 4.E (expenses) is built before 4.F (wastage/count) because expenses is the client's sixth requirement and wastage was not asked for; the P&L in 4.G needs both, so the order only changes the schedule, not the result.
 
 Order of work: **4.A → 4.D is the heart of the client's request.** 4.E and 4.F are independent and small; 4.G last because it needs their data.
+
+### 4.F contract, as built
+
+`stock:wastage` · `stock:adjust` · `stock:wastage-report` · `stock:counts` · `stock:count` ·
+`stock:count-save`, all behind `stock:adjust` for writes (owner + manager; a cashier may read
+the reports but never writes off stock) and `inventory:read` for reads.
+
+- **Wastage** takes a POSITIVE `qtyBase` and negates it internally, values it at the current
+  average cost, and stores a reason code (`spoiled`, `dropped`, `expired`, `staff_meal`,
+  `test`, `other`) plus optional notes. It refuses zero/negative quantities, a future date,
+  and — importantly — more than is on the shelf, because the answer to a wrong shelf is a
+  stock count, not a wastage row. Wastage never moves the average cost.
+- **Adjustment** is signed (`+` adds, `−` removes), needs a reason of at least three
+  characters, and cannot remove more than exists. Kind is `adjustment`.
+- **Stock count** SETS the shelf to the counted quantity with one `stock_count` movement per
+  differing line; a zero-variance line is still stored on the count but writes no movement.
+  Each line freezes `book_qty`, `counted_qty`, `variance`, `unit_cost_milli` and
+  `variance_value`, and the count's `varianceValue` is Σ|variance| × average cost at the
+  moment of saving — a later price change never rewrites history. Numbers are `CNT-00001`.
+- **Supplier return** needed no new table: the ledger already has a `supplier_return` kind,
+  so a return is a movement of that kind with a reason.
+- The wastage report groups by ingredient + reason over a date range and returns
+  `{from,to,rows,total,qty}`; the same numbers feed `reports:profit.wastageValue`.
+
+Verification: `scripts/test-phase21.mjs` (15 checks) — quantities and values, the three
+refusals, average-cost stability, count semantics (set, not add), zero-variance handling,
+frozen variance value, ledger/cache/service agreement, the P&L tie-in, and the permission
+split between cashier and manager.
 
 ---
 

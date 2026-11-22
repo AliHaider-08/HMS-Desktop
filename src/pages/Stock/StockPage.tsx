@@ -32,12 +32,16 @@ import { SupplierModal } from './SupplierModal';
 import { VoidPurchaseModal } from './VoidPurchaseModal';
 import { PurchaseDetailModal } from './PurchaseDetailModal';
 import { IngredientDetailModal } from './IngredientDetailModal';
+import { WastageTab } from './WastageTab';
+import { StockCountsTab } from './StockCountsTab';
 
-type Tab = 'levels' | 'purchases' | 'suppliers';
+type Tab = 'levels' | 'purchases' | 'suppliers' | 'wastage' | 'counts';
 
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'levels', label: 'Stock levels' },
   { value: 'purchases', label: 'Purchases' },
+  { value: 'wastage', label: 'Wastage' },
+  { value: 'counts', label: 'Stock counts' },
   { value: 'suppliers', label: 'Suppliers' },
 ];
 
@@ -547,6 +551,26 @@ export function StockPage() {
           isLoading={purchases.isLoading}
           emptyMessage="No purchases yet"
           emptyHint="Press Add purchase after a delivery arrives, so the shelf and the cost stay right."
+        />
+      )}
+
+      {tab === 'wastage' && (
+        <WastageTab
+          ingredients={ingredients}
+          canWrite={allow('stock:adjust')}
+          onChanged={() => {
+            void reloadAll();
+          }}
+        />
+      )}
+
+      {tab === 'counts' && (
+        <StockCountsTab
+          ingredients={ingredients}
+          canWrite={allow('stock:adjust')}
+          onChanged={() => {
+            void reloadAll();
+          }}
         />
       )}
 

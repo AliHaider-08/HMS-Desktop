@@ -788,6 +788,18 @@ export type StockMovementKind =
 
 export type PurchaseStatus = 'posted' | 'void';
 
+/** Why stock was thrown away. Free text stays in `reason` for the detail. */
+export type WastageReason = 'spoiled' | 'dropped' | 'expired' | 'staff_meal' | 'test' | 'other';
+
+export const WASTAGE_REASON_LABELS: Record<WastageReason, string> = {
+  spoiled: 'Spoiled / went bad',
+  dropped: 'Dropped or spilled',
+  expired: 'Expired',
+  staff_meal: 'Staff meal',
+  test: 'Test / trial batch',
+  other: 'Other',
+};
+
 export interface Supplier {
   id: number;
   name: string;
@@ -955,6 +967,8 @@ export interface StockMovement {
   reason: string;
   refPurchaseId: number | null;
   refOrderId: number | null;
+  /** Only on wastage rows: the reason code, for the wastage report (4.F). */
+  wastageReason: WastageReason | null;
   createdByName: string;
   createdAt: string;
 }
@@ -975,6 +989,91 @@ export interface IngredientDetail {
   usedInItems: Array<{ itemId: number; itemName: string; qtyBase: number }>;
 }
 
+/* ------------------------------------------------------------------ */
+/* Wastage, adjustments and stock counts (4.F)                         */
+/* ------------------------------------------------------------------ */
+
+export interface StockCount {
+  id: number;
+  countNo: string;
+  countedOn: string;
+  /** Sum of |variance| × average cost, in paisa, frozen at count time. */
+  varianceValue: number;
+  lineCount: number;
+  notes: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface StockCountLine {
+  id: number;
+  ingredientId: number;
+  ingredientName: string;
+  baseUnit: BaseUnit;
+  /** What the ledger said. */
+  bookQty: number;
+  /** What the owner counted. */
+  countedQty: number;
+  /** counted − book. */
+  variance: number;
+  unitCostMilli: number;
+  varianceValue: number;
+}
+
+export interface StockCountDetail {
+  count: StockCount;
+  lines: StockCountLine[];
+}
+
+/** One row of the wastage report: a reason for one ingredient. */
+export interface WastageRow {
+  ingredientId: number;
+  ingredientName: string;
+  baseUnit: BaseUnit;
+  reason: WastageReason;
+  movements: number;
+  /** Absolute base units lost. */
+  qty: number;
+  /** Money lost, in paisa. */
+  value: number;
+}
+
+export interface WastageOverview {
+  from: string;
+  to: string;
+  rows: WastageRow[];
+  total: number;
+  qty: number;
+}
+
+export interface WastageInput {
+  ingredientId: number;
+  /** Positive base units to throw away; the service makes it negative. */
+  qtyBase: number;
+  reason: WastageReason;
+  notes: string;
+  /** Calendar day it happened (YYYY-MM-DD). Defaults to today server-side. */
+  happenedOn: string;
+}
+
+export interface AdjustmentInput {
+  ingredientId: number;
+  /** Signed base units: positive finds stock, negative removes it. */
+  qtyBase: number;
+  reason: string;
+}
+
+export interface CountLineInput {
+  ingredientId: number;
+  countedQty: number;
+}
+
+export interface StockCountInput {
+  countedOn: string;
+  notes: string;
+  lines: CountLineInput[];
+}
+
 export interface StockApi {
   overview(): Promise<ApiResult<StockOverview>>;
   ingredients(): Promise<ApiResult<Ingredient[]>>;
@@ -992,6 +1091,14 @@ export interface StockApi {
   voidPurchase(input: { id: number; reason: string }): Promise<ApiResult<Purchase>>;
   openingStock(input: OpeningStockInput): Promise<ApiResult<{ applied: number }>>;
   movements(input: { ingredientId: number; limit: number }): Promise<ApiResult<StockMovement[]>>;
+
+  /* 4.F — wastage, adjustments and counts */
+  recordWastage(input: WastageInput): Promise<ApiResult<StockMovement>>;
+  adjust(input: AdjustmentInput): Promise<ApiResult<StockMovement>>;
+  wastageReport(range: { fromDate: string; toDate: string }): Promise<ApiResult<WastageOverview>>;
+  counts(): Promise<ApiResult<StockCount[]>>;
+  count(input: { id: number }): Promise<ApiResult<StockCountDetail>>;
+  saveCount(input: StockCountInput): Promise<ApiResult<StockCountDetail>>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1606,6 +1713,14 @@ export const CHANNELS = {
   purchaseVoid: 'stock:purchase-void',
   openingStock: 'stock:opening',
   stockMovements: 'stock:movements',
+
+  // Wastage, adjustments and stock counts (4.F)
+  stockWastage: 'stock:wastage',
+  stockAdjust: 'stock:adjust',
+  stockWastageReport: 'stock:wastage-report',
+  stockCounts: 'stock:counts',
+  stockCountGet: 'stock:count',
+  stockCountSave: 'stock:count-save',
 
   // Recipes and costing (4.C)
   menuCosts: 'recipes:menu-costs',

@@ -112,6 +112,12 @@
       voidPurchase: call('stock:purchase-void'),
       openingStock: call('stock:opening'),
       movements: call('stock:movements'),
+      recordWastage: call('stock:wastage'),
+      adjust: call('stock:adjust'),
+      wastageReport: call('stock:wastage-report'),
+      counts: call('stock:counts'),
+      count: call('stock:count'),
+      saveCount: call('stock:count-save'),
     },
     recipes: {
       menuCosts: call('recipes:menu-costs'),

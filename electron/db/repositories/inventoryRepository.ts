@@ -1,6 +1,7 @@
 import type { AppDatabase } from '../connection';
 import type {
   BaseUnit,
+  WastageReason,
   Ingredient,
   IngredientDetail,
   IngredientInput,
@@ -84,6 +85,7 @@ interface MovementRow {
   unit_cost_milli: number;
   reason: string;
   ref_purchase_id: number | null;
+  wastage_reason?: string | null;
   ref_order_id: number | null;
   created_by_name: string;
   created_at: string;
@@ -173,6 +175,7 @@ const toMovement = (row: MovementRow): StockMovement => ({
   reason: row.reason,
   refPurchaseId: row.ref_purchase_id,
   refOrderId: row.ref_order_id,
+  wastageReason: (row.wastage_reason as WastageReason | null | undefined) ?? null,
   createdByName: row.created_by_name,
   createdAt: row.created_at,
 });
@@ -413,14 +416,14 @@ export function createInventoryRepository(db: AppDatabase) {
   const insertMovement = db.prepare(`
     INSERT INTO stock_movements
       (ingredient_id, kind, qty, unit_cost_milli, reason, ref_purchase_id,
-       ref_order_id, ref_order_item_id, created_by, created_at)
+       ref_order_id, ref_order_item_id, wastage_reason, created_by, created_at)
     VALUES
       (@ingredientId, @kind, @qty, @unitCostMilli, @reason, @refPurchaseId,
-       @refOrderId, @refOrderItemId, @createdBy, @now)
+       @refOrderId, @refOrderItemId, @wastageReason, @createdBy, @now)
   `);
   const selectMovements = db.prepare<[number, number], MovementRow>(`
     SELECT m.id, m.ingredient_id, m.kind, m.qty, m.unit_cost_milli, m.reason,
-           m.ref_purchase_id, m.ref_order_id,
+           m.ref_purchase_id, m.ref_order_id, m.wastage_reason,
            u.full_name AS created_by_name, m.created_at
       FROM stock_movements m
       JOIN users u ON u.id = m.created_by
@@ -574,6 +577,8 @@ export function createInventoryRepository(db: AppDatabase) {
       refPurchaseId?: number | null;
       refOrderId?: number | null;
       refOrderItemId?: number | null;
+      /** Only for kind 'wastage': why the stock was lost (4.F). */
+      wastageReason?: string | null;
       createdBy: number;
     }): void {
       const row = selectIngredient.get(input.ingredientId);
@@ -604,6 +609,7 @@ export function createInventoryRepository(db: AppDatabase) {
         refPurchaseId: input.refPurchaseId ?? null,
         refOrderId: input.refOrderId ?? null,
         refOrderItemId: input.refOrderItemId ?? null,
+        wastageReason: input.wastageReason ?? null,
         createdBy: input.createdBy,
         now,
       });

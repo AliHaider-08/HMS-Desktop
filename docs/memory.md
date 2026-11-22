@@ -7,9 +7,10 @@
 Fast Food Management Desktop App (Electron + React + SQLite)
 
 ## Current Status
-- Current phase: **Roadmap Phase 1 (release blockers) complete — PR open, CI green. Phase 2 not started.**
-- Original six phases are code complete and merged; the roadmap below hardens them before new features.
-- File currently being worked on: `docs/memory.md` (last code file: `src/pages/Reports/ReportsPage.tsx`)
+- Current phase: **Roadmap Phase 4 — 4.A → 4.F done, 4.G P&L done; the rest of 4.G is next.**
+- Original six phases and the roadmap hardening are complete and merged.
+- File currently being worked on: `docs/memory.md` (last code files: `src/pages/Stock/WastageTab.tsx`,
+  `src/pages/Stock/StockCountsTab.tsx`, `scripts/test-phase21.mjs`)
 - App runs offline; data file: `%APPDATA%\gul-khan-fast-food\data\fastfood.db`
 - Logs: `%APPDATA%\gul-khan-fast-food\logs\app.log`
 - Backups: `%APPDATA%\gul-khan-fast-food\backups\` (auto on close, keeps last 7)
@@ -266,9 +267,9 @@ The five things that were fine in a demo and wrong in a shop. Each has a test in
   **Load older orders** button and discards accumulated pages when a filter changes (in the filter
   setter, not an effect — the React compiler rejects `setState` inside `useEffect`).
 
-## Phase 4 — Inventory, recipes and expenses (migrations 015–020)
+## Phase 4 — Inventory, recipes and expenses (migrations 015–021)
 
-The client's six requirements, in the app. 331 checks across 19 suites, `npm run verify` green.
+The client's six requirements, in the app. 358 checks across 21 suites, `npm run verify` green.
 
 ### What exists now
 
@@ -303,7 +304,23 @@ The client's six requirements, in the app. 331 checks across 19 suites, `npm run
   silently dropped. Void keeps the row (`status='void'`, reason, who) and refunds the drawer, into
   the paying shift if still open, else into today's.
 
-- **4.F — profit & loss** (no migration, phase20, 12 checks).
+- **4.F — wastage, adjustments, stock count** (`021_stock_ops.sql`, phase21, 15 checks).
+  The three ways a shelf moves that are neither a purchase nor a sale, which is exactly why a
+  stock figure drifts a month after go-live. **Wastage** takes a positive quantity, values it at
+  the current average cost, and stores a reason code (`spoiled` / `dropped` / `expired` /
+  `staff_meal` / `test` / `other`) plus optional notes. It refuses a future date, a zero, and more
+  than is on the shelf — the answer to a wrong shelf is a count, not a write-off — and it never
+  moves the average cost (a quantity event is not a price event). **Adjustment** is signed, needs a
+  reason of at least three characters, and cannot remove more than exists. **Stock count** is the
+  important one: the shelf is **SET** to the counted quantity, one `stock_count` movement per
+  differing line, with `book_qty`, `counted_qty`, `variance` and a `variance_value` frozen at the
+  day's average cost. A line that matches writes no movement but is still stored, so the count is
+  a complete record. Numbers are `CNT-00001`. **Supplier return** needed no new table — the ledger
+  already had the `supplier_return` kind. UI: a **Wastage** tab (period report, money by reason,
+  entry modal with a live estimate) and a **Stock counts** tab (count list, count detail with
+  book-vs-counted, adjust button). Both writes sit behind `stock:adjust`, which a cashier does not
+  have: a cashier may read the loss, never write it off.
+- **4.G — profit & loss** (no migration, phase20, 12 checks).
   The report the owner actually asked for: `net sales (ex tax, after discounts) − cost of
   food = gross profit`, then `− shop expenses = net profit`. One tab on the Reports page,
   marked "Profit & loss", opens first.
@@ -336,11 +353,21 @@ The client's six requirements, in the app. 331 checks across 19 suites, `npm run
 - **A drawer expense must use the `expense` movement kind**, not `cash_out`: `expectedCash`
   and the Z report subtract `expense`, so `cash_out` takes the money out but leaves the
   report's expense line at zero.
+- **A stock count's variance value is Σ|variance| × cost, not Σvariance × cost.** Shortages and
+  overages on different ingredients do not cancel out: the owner needs to know the *size* of the
+  discrepancy, and a +50 g overage does not make a −50 g shortage disappear.
+- **`countLineSchema` must be refined for duplicates on the array, not per line.** Two lines for
+  the same ingredient would set the shelf twice in one transaction, so the duplicate check lives on
+  the whole object with a `path` pointing at `lines`.
+- **`StockCountModal` computes its variance total with the same formula as the service** so the
+  figure the owner reads before saving is the figure that is saved. If you change one, change both.
 - **The preview server must inject the bridge on `/` too.** It used to serve
   `dist/index.html` raw for the root path, so the preview loaded with no `window.api` and
   the login button did nothing. Only real assets are served byte-for-byte now.
 
 ## Last Updated
 - Date: 2026-11-22
-- By: Arena Agent (Phase 4 — 4.A to 4.E, 4.G P&L). All six client requirements delivered;
-  343 checks across 20 suites; `npm run verify` green.
+- By: Arena Agent (Phase 4 — 4.A to 4.F, 4.G P&L). All six client requirements delivered plus
+  wastage/adjustments/stock counts; 358 checks across 21 suites; `npm run verify` green.
+- Remaining in Phase 4: the non-P&L half of 4.G (item profitability table, stock valuation,
+  purchases/wastage/expense report tabs, dashboard cards, CSV export).

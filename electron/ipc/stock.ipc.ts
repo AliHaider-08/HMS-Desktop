@@ -1,13 +1,17 @@
 import { z } from 'zod';
 import { CHANNELS } from '../../src/types/api';
 import {
+  adjustmentSchema,
   ingredientSchema,
   loadStarterListSchema,
   openingStockSchema,
   purchaseFilterSchema,
   purchaseSchema,
+  stockCountSchema,
+  stockReportRangeSchema,
   supplierSchema,
   voidPurchaseSchema,
+  wastageSchema,
 } from '../../src/types/schemas';
 import type { InventoryService } from '../services/inventoryService';
 import type { HandlerContext, HandlerRegistry } from './registry';
@@ -139,6 +143,48 @@ export function stockHandlers(inventory: InventoryService): HandlerRegistry {
       capability: 'inventory:read',
       schema: movementsSchema,
       handler: (input: { ingredientId: number; limit: number }) => inventory.movements(input),
+    },
+
+    /* ------------------ wastage, adjustments, counts (4.F) ------------------ */
+
+    [CHANNELS.stockWastage]: {
+      // Throwing food away is a stock decision, not a till decision: a cashier can
+      // read the shelf but cannot write off its value.
+      capability: 'stock:adjust',
+      schema: wastageSchema,
+      handler: (input: Parameters<InventoryService['recordWastage']>[0], context: HandlerContext) =>
+        inventory.recordWastage(input, context.user.id),
+    },
+
+    [CHANNELS.stockAdjust]: {
+      capability: 'stock:adjust',
+      schema: adjustmentSchema,
+      handler: (input: Parameters<InventoryService['adjust']>[0], context: HandlerContext) =>
+        inventory.adjust(input, context.user.id),
+    },
+
+    [CHANNELS.stockWastageReport]: {
+      capability: 'inventory:read',
+      schema: stockReportRangeSchema,
+      handler: (input: { fromDate: string; toDate: string }) => inventory.wastageReport(input),
+    },
+
+    [CHANNELS.stockCounts]: {
+      capability: 'inventory:read',
+      handler: () => inventory.counts(),
+    },
+
+    [CHANNELS.stockCountGet]: {
+      capability: 'inventory:read',
+      schema: z.object({ id: z.number().int().positive() }),
+      handler: (input: { id: number }) => inventory.count(input.id),
+    },
+
+    [CHANNELS.stockCountSave]: {
+      capability: 'stock:adjust',
+      schema: stockCountSchema,
+      handler: (input: Parameters<InventoryService['saveCount']>[0], context: HandlerContext) =>
+        inventory.saveCount(input, context.user.id),
     },
   };
 }

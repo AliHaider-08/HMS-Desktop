@@ -154,6 +154,12 @@ const api: RendererApi = {
     openingStock: (input) => invoke(CHANNELS.openingStock, input),
     movements: (ingredientId, limit = 100) =>
       invoke(CHANNELS.stockMovements, { ingredientId, limit }),
+    recordWastage: (input) => invoke(CHANNELS.stockWastage, input),
+    adjust: (input) => invoke(CHANNELS.stockAdjust, input),
+    wastageReport: (range) => invoke(CHANNELS.stockWastageReport, range),
+    counts: () => invoke(CHANNELS.stockCounts),
+    count: (id) => invoke(CHANNELS.stockCountGet, { id }),
+    saveCount: (input) => invoke(CHANNELS.stockCountSave, input),
   },
 
   recipes: {
