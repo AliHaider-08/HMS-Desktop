@@ -165,6 +165,14 @@ const api: RendererApi = {
     saveStockSettings: (input) => invoke(CHANNELS.stockSettingsSave, input),
   },
 
+  expenses: {
+    overview: (input) => invoke(CHANNELS.expensesOverview, input),
+    save: (input) => invoke(CHANNELS.expenseSave, input),
+    void: (input) => invoke(CHANNELS.expenseVoid, input),
+    saveCategory: (input) => invoke(CHANNELS.expenseCategorySave, input),
+    deleteCategory: (input) => invoke(CHANNELS.expenseCategoryDelete, input),
+  },
+
   users: {
     list: () => invoke(CHANNELS.users),
     save: (input) => invoke(CHANNELS.userSave, input),

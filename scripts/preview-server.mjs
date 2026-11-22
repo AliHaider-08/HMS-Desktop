@@ -60,6 +60,7 @@ const repos = {
   tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
   inventory: load('db/repositories/inventoryRepository.js').createInventoryRepository(db),
   recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
+  expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
 };
 
 // Printing needs a real window. The preview throws so the UI reports it honestly,
@@ -169,6 +170,10 @@ const registry = buildRegistry({
   }),
   inventory: load('services/inventoryService.js').createInventoryService({
     inventory: repos.inventory,
+    shifts: repos.shifts,
+  }),
+  expenses: load('services/expensesService.js').createExpensesService({
+    expenses: repos.expenses,
     shifts: repos.shifts,
   }),
   recipes: load('services/recipeService.js').createRecipeService({

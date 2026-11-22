@@ -688,3 +688,47 @@ export const stockSettingsSchema = z.object({
     .min(0, 'The margin cannot be negative')
     .max(9_900, 'The margin must be below 100%'),
 });
+
+/* ---------------------------- shop expenses (4.F) ---------------------------- */
+
+export const expenseSchema = z.object({
+  categoryId: idField,
+  spentOn: dateField,
+  amount: z
+    .number(message)
+    .int('Enter the amount in whole rupees')
+    .min(1, 'The amount must be more than zero')
+    .max(1_000_000_000, 'Amount is too large'),
+  // Where the money came from. 'cash' needs an open drawer; the service enforces
+  // that, because only it can see the shift.
+  paidFrom: z.enum(['cash', 'bank', 'other'], message),
+  payee: optionalText(120, 'Paid to'),
+  notes: optionalText(300, 'Notes'),
+});
+
+export const expenseCategorySchema = z.object({
+  id: idField.optional(),
+  name: z
+    .string(message)
+    .trim()
+    .min(2, 'Give the category a name')
+    .max(60, 'Name is too long'),
+  sortOrder: z.number(message).int().min(0).max(999).default(0),
+});
+
+export const expenseVoidSchema = z.object({
+  id: idField,
+  reason: z
+    .string(message)
+    .trim()
+    .min(3, 'Give a short reason for voiding this expense')
+    .max(200, 'Reason is too long'),
+});
+
+export const expenseIdSchema = z.object({ id: idField });
+
+export const expenseListSchema = z.object({
+  from: dateField,
+  to: dateField,
+  status: z.enum(['active', 'void', 'all']).default('active'),
+});

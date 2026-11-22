@@ -35,8 +35,10 @@ import { createTablesService } from './services/tablesService';
 import { createInventoryRepository } from './db/repositories/inventoryRepository';
 import { createInventoryService } from './services/inventoryService';
 import { createRecipeRepository } from './db/repositories/recipeRepository';
+import { createExpensesRepository } from './db/repositories/expensesRepository';
 import { createRecipeService } from './services/recipeService';
 import { createStockDeductionService } from './services/stockDeductionService';
+import { createExpensesService } from './services/expensesService';
 import { createBackupService } from './services/backupService';
 import { createPrintService } from './services/printService';
 import { buildRegistry, dispatch } from './ipc';
@@ -123,6 +125,7 @@ async function bootstrapServices(): Promise<void> {
   const tablesRepo = createTablesRepository(db);
   const inventoryRepo = createInventoryRepository(db);
   const recipeRepo = createRecipeRepository(db);
+  const expensesRepo = createExpensesRepository(db);
 
   await seedDefaultAdmin(users);
   if (allowDemoData) {
@@ -284,6 +287,7 @@ async function bootstrapServices(): Promise<void> {
       inventory: inventoryRepo,
       shifts: shiftsRepo,
     }),
+    expenses: createExpensesService({ expenses: expensesRepo, shifts: shiftsRepo }),
     recipes: createRecipeService({
       recipes: recipeRepo,
       catalog: catalogRepo,

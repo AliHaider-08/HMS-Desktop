@@ -252,11 +252,15 @@ Each sub-phase has its own migration, test script, `npm run verify` gate and a `
 |---|---|---|---|---|---|
 | **4.A** | Ingredients, suppliers, starter list | `suppliers`, `ingredients`, stock page shell (levels + suppliers tabs), ingredient/supplier CRUD, starter catalogue loader, stock value, permissions | `015_inventory.sql` | `test-phase15.mjs` | **done** |
 | **4.B** | Purchases and stock ledger | Add Purchase screen, `purchases`/`purchase_items`/`stock_movements`, weighted average, landed cost, void purchase, opening stock, low-stock alerts, drawer link | `016_purchases.sql` | `test-phase16.mjs` | **done** |
-| **4.C** | Recipes and costing | Recipe editor on Menu, `recipe_items`, cost / profit / margin columns, price helper, "Can make N", no-recipe flags, margin alerts | `017_recipes.sql` | `test-phase17.mjs` | **done** |
-| **4.D** | Automatic deduction | Deduct on order save, `order_item_stock` snapshot, `order_items.cost_total`, cancel rules (prepared / not prepared), amend re-valuation, negative-stock setting, per-order profit | `018_deduction.sql` | `test-phase18.mjs` | **done** |
-| **4.E** | Wastage, adjustments, stock count | Wastage entry, stock count with variance, adjustment ledger, supplier return, wastage report | `019_stock_ops.sql` | `test-phase19.mjs` | **done** |
-| **4.F** | Shop expenses | Categories, entry, drawer link, void with audit, recurring bills (4.F2), drawings (4.F2) | `020_expenses.sql` | `test-phase20.mjs` | **done** |
-| **4.G** | Profit and reports | P&L, item profitability, stock valuation, purchases, wastage, expenses, dashboard cards, CSV export | none | `test-phase21.mjs` | **done** |
+| **4.C** | Recipes and costing | Recipe editor on Menu, `recipe_items`, cost / profit / margin columns, price helper, "Can make N", no-recipe flags, margin alerts | `018_recipes.sql` | `test-phase17.mjs` | **done** (backend + Menu UI) |
+| **4.D** | Automatic deduction | Deduct on order save, `order_item_stock` snapshot, `order_items.cost_total`, cancel rules (prepared / not prepared), amend re-valuation, negative-stock setting, per-order profit | `019_deduction.sql` | `test-phase18.mjs` | **done** |
+| **4.E** | Shop expenses | Categories, entry, drawer link, void with audit, recurring bills (4.E2), drawings (4.E2) | `020_expenses.sql` | `test-phase19.mjs` | **done** |
+| **4.F** | Wastage, adjustments, stock count | Wastage entry, stock count with variance, adjustment ledger, supplier return, wastage report | `021_stock_ops.sql` | `test-phase20.mjs` | **next** |
+| **4.G** | Profit and reports | P&L, item profitability, stock valuation, purchases, wastage, expenses, dashboard cards, CSV export | none | `test-phase21.mjs` | planned |
+
+Migration numbering (authoritative): 015 inventory, 016 purchases, 017 cash↔purchase link, 018 recipes, 019 deduction, **020 expenses**, **021 stock ops**.
+
+Scope note: 4.E (expenses) is built before 4.F (wastage/count) because expenses is the client's sixth requirement and wastage was not asked for; the P&L in 4.G needs both, so the order only changes the schedule, not the result.
 
 Order of work: **4.A → 4.D is the heart of the client's request.** 4.E and 4.F are independent and small; 4.G last because it needs their data.
 

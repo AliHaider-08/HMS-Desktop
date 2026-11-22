@@ -64,6 +64,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     tables: load('db/repositories/tablesRepository.js').createTablesRepository(db),
     inventory: load('db/repositories/inventoryRepository.js').createInventoryRepository(db),
     recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
+    expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
   };
 
   const { createAuthService } = load('services/authService.js');
@@ -205,6 +206,10 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
       catalog: repositories.catalog,
       inventory: repositories.inventory,
       settings: repositories.settings,
+    }),
+    expenses: load('services/expensesService.js').createExpensesService({
+      expenses: repositories.expenses,
+      shifts: repositories.shifts,
     }),
   });
 

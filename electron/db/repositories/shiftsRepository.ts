@@ -36,6 +36,7 @@ interface MovementRow {
   reason: string;
   ref_order_id: number | null;
   ref_purchase_id: number | null;
+  ref_expense_id: number | null;
   created_by: number;
   created_by_name: string;
   created_at: string;
@@ -70,6 +71,7 @@ function toMovement(row: MovementRow): CashMovement {
     reason: row.reason,
     refOrderId: row.ref_order_id,
     refPurchaseId: row.ref_purchase_id,
+    refExpenseId: row.ref_expense_id ?? null,
     createdBy: row.created_by,
     createdByName: row.created_by_name,
     createdAt: row.created_at,
@@ -121,10 +123,10 @@ export function createShiftsRepository(db: AppDatabase) {
   const insertMovement = db.prepare(`
     INSERT INTO cash_movements
       (shift_id, kind, method, amount, reason, ref_order_id, ref_purchase_id,
-       created_by, created_at)
+       ref_expense_id, created_by, created_at)
     VALUES
       (@shiftId, @kind, @method, @amount, @reason, @refOrderId, @refPurchaseId,
-       @createdBy, @createdAt)
+       @refExpenseId, @createdBy, @createdAt)
   `);
 
   const selectMovement = db.prepare<[number], MovementRow>(`
@@ -257,6 +259,8 @@ export function createShiftsRepository(db: AppDatabase) {
       refOrderId: number | null;
       /** Set when a purchase moved the cash, so a void can reverse exactly this row. */
       refPurchaseId?: number | null;
+      /** Set when a shop expense moved the cash, so a void can reverse exactly this row. */
+      refExpenseId?: number | null;
       createdBy: number;
     }): CashMovement {
       return db.transaction(() => {
@@ -274,6 +278,7 @@ export function createShiftsRepository(db: AppDatabase) {
           reason: input.reason,
           refOrderId: input.refOrderId,
           refPurchaseId: input.refPurchaseId ?? null,
+          refExpenseId: input.refExpenseId ?? null,
           createdBy: input.createdBy,
           createdAt: toSqlDateTime(),
         });

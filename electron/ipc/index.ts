@@ -16,6 +16,7 @@ import type { KotService } from '../services/kotService';
 import type { TablesService } from '../services/tablesService';
 import type { InventoryService } from '../services/inventoryService';
 import type { RecipeService } from '../services/recipeService';
+import type { ExpensesService } from '../services/expensesService';
 import { authHandlers } from './auth.ipc';
 import { menuHandlers } from './menu.ipc';
 import { ordersHandlers } from './orders.ipc';
@@ -31,6 +32,7 @@ import { kotHandlers } from './kot.ipc';
 import { tablesHandlers } from './tables.ipc';
 import { stockHandlers } from './stock.ipc';
 import { recipesHandlers } from './recipes.ipc';
+import { expensesHandlers } from './expenses.ipc';
 import type { HandlerRegistry } from './registry';
 
 export interface IpcServices {
@@ -52,6 +54,7 @@ export interface IpcServices {
   tables: TablesService;
   inventory: InventoryService;
   recipes: RecipeService;
+  expenses: ExpensesService;
 }
 
 /**
@@ -76,6 +79,7 @@ export function buildRegistry(services: IpcServices): HandlerRegistry {
     ...tablesHandlers(services.tables),
     ...stockHandlers(services.inventory),
     ...recipesHandlers(services.recipes),
+    ...expensesHandlers(services.expenses),
   };
 }
 

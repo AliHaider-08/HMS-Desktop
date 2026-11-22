@@ -121,6 +121,13 @@
       stockSettings: call('stock:settings'),
       saveStockSettings: call('stock:settings-save'),
     },
+    expenses: {
+      overview: call('expenses:overview'),
+      save: call('expenses:save'),
+      void: call('expenses:void'),
+      saveCategory: call('expenses:category-save'),
+      deleteCategory: call('expenses:category-delete'),
+    },
     users: {
       list: call('users:list'),
       save: call('users:save'),

@@ -266,6 +266,57 @@ The five things that were fine in a demo and wrong in a shop. Each has a test in
   **Load older orders** button and discards accumulated pages when a filter changes (in the filter
   setter, not an effect — the React compiler rejects `setState` inside `useEffect`).
 
+## Phase 4 — Inventory, recipes and expenses (migrations 015–020)
+
+The client's six requirements, in the app. 331 checks across 19 suites, `npm run verify` green.
+
+### What exists now
+
+- **4.A — ingredients, suppliers, starter list** (`015_inventory.sql`, phase15, 19 checks).
+  Base units g / ml / pcs with a purchase unit and conversion (`units_per_purchase`), so the shop
+  buys a 100-bun packet and sells one bun. A starter catalogue of fast-food ingredients is offered
+  on first use and is idempotent. Soft delete; an ingredient used by a recipe cannot be deleted.
+- **4.B — purchases and the stock ledger** (`016_purchases.sql`, phase16, 23 checks).
+  `stock_movements` is the single source of truth; `ingredients.qty_on_hand` is a cache of it and
+  the tests assert they agree. Weighted moving average per receipt, landed cost (extra charges are
+  spread over the lines), void purchase (history kept), opening stock, low-stock flags. A **cash**
+  purchase paid inside an open shift writes an `expense` cash movement; a credit purchase touches
+  nothing. Voiding refunds into the shift that paid, or into today's drawer if that day is closed.
+- **4.C — recipes and costing** (`018_recipes.sql`, phase17, 20 checks).
+  One recipe per menu item, per-serving quantities in base units with an optional waste %. Cost is
+  the sum of `qty × average cost`; profit and margin follow. `canMake` is the tightest ingredient.
+  An item with no recipe reports cost `null`, never 0 — unknown is not free. The owner sets the
+  price; a suggested price for a target margin is offered, never applied.
+- **4.D — automatic deduction** (`019_deduction.sql`, phase18, 18 checks).
+  Saving a bill deducts inside the **same transaction**, so a blocked sale leaves neither a bill
+  nor a moved shelf. Each line's cost is frozen in `order_item_stock` + `order_items.cost_total`,
+  so a later price rise or recipe edit cannot rewrite last week's profit. Cancel returns the stock,
+  or — cooked — returns it and books the same quantity as `wastage` (return-then-write-off; writing
+  wastage on top of an untouched sale would remove the stock twice). Amend releases the old
+  snapshot, rewrites the lines, re-deducts at today's cost. Merge and split move no stock.
+  `stock_movements.ref_order_item_id` is `ON DELETE SET NULL` so an amendment can delete lines.
+- **4.E — shop expenses** (`020_expenses.sql`, phase19, 12 checks).
+  Categories ship with the app (rent, electricity, gas, salaries, repairs, … plus a built-in
+  "Other"). A **cash** expense writes a `cash_out`-equivalent `expense` movement on the open shift
+  — the kind is `expense`, because that is what `expectedCash` and the Z report subtract. Bank and
+  outside-money expenses never touch the drawer. A cash expense with no open shift is refused, not
+  silently dropped. Void keeps the row (`status='void'`, reason, who) and refunds the drawer, into
+  the paying shift if still open, else into today's.
+
+### Gotchas that cost time (do not relearn these)
+
+- **`GROUP BY` must come after `WHERE`.** Adding the cost aggregate to `ORDER_SELECT` put
+  `GROUP BY o.id` inside the shared string, and every filtered order query then died with
+  `near "WHERE": syntax error`. It is a separate `ORDER_GROUP` constant appended after the filter.
+- **`stock_movements.ref_order_item_id` was `RESTRICT`.** Amending a bill deletes its lines, so the
+  FK blocked every amended bill. It is now `SET NULL`; `releaseOrder()` also detaches the refs so
+  databases created before the change still work.
+- **The category-delete channel takes `{ id }`, not a number**, and the preview bridge must forward
+  the same shape as preload.
+- **better-sqlite3 rejects mixed parameter styles** in one statement — use `@name` everywhere.
+- **`shift:x-report` takes `{ shiftId }`**, not `{ id }`; an x-report on a *closed* shift is what
+  the tests use to prove a closed day was not rewritten.
+
 ## Last Updated
-- Date: 2026-11-16
-- By: Arena Agent (Phase 3 — hardening)
+- Date: 2026-11-22
+- By: Arena Agent (Phase 4 — 4.A to 4.E)

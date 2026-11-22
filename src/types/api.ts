@@ -258,6 +258,8 @@ export interface CashMovement {
   refOrderId: number | null;
   /** Set when the money moved because of a stock purchase (4.B). */
   refPurchaseId: number | null;
+  /** Set when the money moved because of a shop expense (4.F). */
+  refExpenseId: number | null;
   createdBy: number;
   createdByName: string;
   createdAt: string;
@@ -996,6 +998,89 @@ export interface StockApi {
 /* Recipes and costing (Roadmap 4.C)                                   */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Shop expenses (4.F)                                                 */
+/* ------------------------------------------------------------------ */
+
+export interface ExpenseCategory {
+  id: number;
+  name: string;
+  sortOrder: number;
+  /** 'Other' ships with the app and cannot be removed. */
+  isSystem: boolean;
+  active: boolean;
+  /** Active expenses filed under it, for the "in use" column and delete guard. */
+  expenseCount: number;
+  /** Total of those expenses, in paisa. */
+  totalAmount: number;
+}
+
+export type ExpensePaidFrom = 'cash' | 'bank' | 'other';
+
+export interface Expense {
+  id: number;
+  expenseNo: string;
+  categoryId: number;
+  categoryName: string;
+  /** Calendar day (YYYY-MM-DD). */
+  spentOn: string;
+  amount: number;
+  paidFrom: ExpensePaidFrom;
+  payee: string;
+  notes: string;
+  /** The open shift the money left, or null when it came from outside the till. */
+  shiftId: number | null;
+  status: 'active' | 'void';
+  voidReason: string;
+  voidedAt: string | null;
+  voidedByName: string | null;
+  createdBy: number;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface ExpenseSummaryRow {
+  categoryName: string;
+  count: number;
+  total: number;
+}
+
+export interface ExpenseOverview {
+  from: string;
+  to: string;
+  expenses: Expense[];
+  categories: ExpenseCategory[];
+  summary: ExpenseSummaryRow[];
+  total: number;
+  /** True when the drawer shift is open, so a cash expense can leave the till. */
+  drawerOpen: boolean;
+}
+
+export interface ExpenseInput {
+  categoryId: number;
+  spentOn: string;
+  amount: number;
+  paidFrom: ExpensePaidFrom;
+  payee: string;
+  notes: string;
+}
+
+export interface ExpenseApi {
+  overview(input: {
+    from: string;
+    to: string;
+    status?: 'active' | 'void' | 'all';
+  }): Promise<ApiResult<ExpenseOverview>>;
+  save(input: ExpenseInput): Promise<ApiResult<Expense>>;
+  void(input: { id: number; reason: string }): Promise<ApiResult<Expense>>;
+  saveCategory(input: {
+    id?: number;
+    name: string;
+    sortOrder: number;
+  }): Promise<ApiResult<ExpenseCategory>>;
+  deleteCategory(input: { id: number }): Promise<ApiResult<null>>;
+}
+
 export interface RecipeLine {
   id: number;
   ingredientId: number;
@@ -1341,6 +1426,7 @@ export interface RendererApi {
   tables: TablesApi;
   stock: StockApi;
   recipes: RecipeApi;
+  expenses: ExpenseApi;
 }
 
 /** IPC channel names, kept in one place so main, preload and the dev bridge cannot drift. */
@@ -1476,6 +1562,13 @@ export const CHANNELS = {
   recipeSetItemPrice: 'recipes:set-item-price',
   stockSettingsGet: 'stock:settings',
   stockSettingsSave: 'stock:settings-save',
+
+  // Shop expenses (4.F)
+  expensesOverview: 'expenses:overview',
+  expenseSave: 'expenses:save',
+  expenseVoid: 'expenses:void',
+  expenseCategorySave: 'expenses:category-save',
+  expenseCategoryDelete: 'expenses:category-delete',
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
