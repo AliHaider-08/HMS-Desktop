@@ -746,6 +746,104 @@ export function createInventoryRepository(db: AppDatabase) {
       }));
     },
 
+    /**
+     * Purchases in a period for the report tab (4.G).
+     *
+     * Voided bills are counted but excluded from the money, so a cancelled delivery
+     * never shows as stock the shop paid for. `outstanding` is what is still owed,
+     * which the owner needs before paying a supplier.
+     */
+    purchaseReportRows(fromDate: string, toDate: string) {
+      if (!selectPurchases) return { rows: [], voidedCount: 0, voidedValue: 0 };
+
+      const rows = db
+        .prepare(
+          `SELECT p.id, p.purchase_no, p.purchased_on, s.name AS supplier_name,
+                  p.bill_no, p.subtotal, p.extra_charges, p.total, p.paid_amount,
+                  p.payment_method, p.status,
+                  (SELECT COUNT(*) FROM purchase_items pi WHERE pi.purchase_id = p.id)
+                    AS line_count
+             FROM purchases p
+             LEFT JOIN suppliers s ON s.id = p.supplier_id
+            WHERE date(p.purchased_on) BETWEEN ? AND ?
+            ORDER BY p.purchased_on DESC, p.id DESC
+            LIMIT 500`,
+        )
+        .all(fromDate, toDate) as Array<{
+        id: number;
+        purchase_no: string;
+        purchased_on: string;
+        supplier_name: string | null;
+        bill_no: string;
+        subtotal: number;
+        extra_charges: number;
+        total: number;
+        paid_amount: number;
+        payment_method: Purchase['paymentMethod'];
+        status: Purchase['status'];
+        line_count: number;
+      }>;
+
+      const voided = rows.filter((row) => row.status === 'void');
+
+      return {
+        rows: rows.map((row) => ({
+          purchaseId: row.id,
+          purchaseNo: row.purchase_no,
+          purchasedOn: row.purchased_on,
+          supplierName: row.supplier_name,
+          billNo: row.bill_no,
+          subtotal: row.subtotal,
+          extraCharges: row.extra_charges,
+          total: row.total,
+          paidAmount: row.paid_amount,
+          // A cash bill is settled at the counter; only credit can be owed.
+          outstanding:
+            row.status === 'void' || row.payment_method !== 'credit'
+              ? 0
+              : Math.max(0, row.total - row.paid_amount),
+          paymentMethod: row.payment_method,
+          status: row.status,
+          lineCount: row.line_count,
+        })),
+        voidedCount: voided.length,
+        voidedValue: voided.reduce((total, row) => total + row.total, 0),
+      };
+    },
+
+    /**
+     * Ingredients whose average cost rose over the last 30 days (4.G).
+     *
+     * Compares the newest landed cost of a posted purchase with the average the
+     * shelf is carrying. A price rise is the warning the owner asked for: it means
+     * every recipe using that ingredient is quietly earning less.
+     */
+    priceRises(sinceDate: string, limit = 10) {
+      return db
+        .prepare(
+          `SELECT i.id AS ingredientId, i.name AS name, i.base_unit AS baseUnit,
+                  i.avg_cost_milli AS oldCostMilli,
+                  MAX(pi.landed_cost_milli) AS newCostMilli
+             FROM ingredients i
+             JOIN purchase_items pi ON pi.ingredient_id = i.id
+             JOIN purchases p ON p.id = pi.purchase_id
+            WHERE p.status = 'posted' AND i.active = 1
+              AND date(p.purchased_on) >= ?
+              AND pi.landed_cost_milli > i.avg_cost_milli
+            GROUP BY i.id
+            ORDER BY (MAX(pi.landed_cost_milli) - i.avg_cost_milli) * 1.0
+                     / MAX(i.avg_cost_milli, 1) DESC
+            LIMIT ?`,
+        )
+        .all(sinceDate, limit) as Array<{
+        ingredientId: number;
+        name: string;
+        baseUnit: Ingredient['baseUnit'];
+        oldCostMilli: number;
+        newCostMilli: number;
+      }>;
+    },
+
     usedInItems(ingredientId: number): IngredientDetail['usedInItems'] {
       if (!selectUsedInItems) return [];
       return selectUsedInItems.all(ingredientId).map((row) => ({

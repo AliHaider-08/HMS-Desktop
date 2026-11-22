@@ -697,6 +697,34 @@ export interface DashboardStats {
   expiringVehicles: VehicleExpiryAlert[];
   recentOrders: OrderSummary[];
   salesByDay: DailySalesRow[];
+
+  /**
+   * Phase 4 cards. Each is optional in the type only because a database that has
+   * not run the 015–021 migrations yet must still render the dashboard; the
+   * service fills them whenever the tables exist.
+   */
+  /** How much of the day could be costed, and what it cost. Null = no bills yet. */
+  todayProfit: {
+    knownNetSales: number;
+    cogs: number;
+    grossProfit: number;
+    unpricedBills: number;
+  } | null;
+  /** Money on the shelf, and how many ingredients have fallen below reorder. */
+  stock: { value: number; lowStockCount: number; outOfStockCount: number } | null;
+  /** Operating cost booked today (4.E). */
+  todayExpenses: number;
+  /** Active menu items with no recipe, so their profit is unknown. */
+  missingRecipes: number;
+  /** Ingredient price rises over the last 30 days, worst first. */
+  priceChecks: Array<{
+    ingredientId: number;
+    name: string;
+    baseUnit: BaseUnit;
+    oldCostMilli: number;
+    newCostMilli: number;
+    changeX100: number;
+  }>;
 }
 
 export interface VehicleExpiryAlert {
@@ -1541,6 +1569,126 @@ export interface ProfitAndLoss {
   expensesByCategory: ExpenseSummaryRow[];
 }
 
+/* ------------------- 4.G reports: margin, stock, purchases ---------------- */
+
+/**
+ * One menu item's real profitability (4.G).
+ *
+ * `revenue` and `cost` come from the frozen snapshot on the sold line, so this
+ * table never disagrees with the P&L above it. A line sold before the item had a
+ * recipe has no cost — `unpricedQty` / `unpricedRevenue` say so rather than
+ * pretending the food was free.
+ */
+export interface ItemProfitRow {
+  itemId: number | null;
+  name: string;
+  qty: number;
+  revenue: number;
+  /** Revenue from lines that carried a cost snapshot. */
+  pricedRevenue: number;
+  cost: number;
+  /** pricedRevenue − cost. */
+  profit: number;
+  /**
+   * Profit as a percentage of pricedRevenue, ×100 (3550 = 35.50%). NULL when no
+   * line had a cost, so the screen can print "—" instead of a fake 0%.
+   */
+  marginX100: number | null;
+  /** Quantity and revenue of sales that could not be costed. */
+  unpricedQty: number;
+  unpricedRevenue: number;
+  /** True when the item has a recipe now, whether or not these lines had one. */
+  hasRecipe: boolean;
+  /**
+   * Why some of this item's revenue could not be priced:
+   *  * `no_recipe` — it has none today, so it needs one;
+   *  * `sold_before_recipe` — the recipe was added after these bills were saved, so
+   *    nothing is wrong now and only an amended bill can price the old lines;
+   *  * null — every line was costed.
+   */
+  unpricedReason: 'no_recipe' | 'sold_before_recipe' | null;
+}
+
+/** What is on the shelf and what it is worth (4.G). */
+export interface StockValueRow {
+  ingredientId: number;
+  name: string;
+  category: string;
+  baseUnit: BaseUnit;
+  purchaseUnit: string;
+  unitsPerPurchase: number;
+  qtyOnHand: number;
+  avgCostMilli: number;
+  /** qtyOnHand × avgCostMilli ÷ 1000, in paisa. */
+  value: number;
+  reorderLevel: number;
+  lowStock: boolean;
+  supplierName: string | null;
+}
+
+export interface StockValuation {
+  rows: StockValueRow[];
+  /** Total money sitting on the shelf, in paisa. */
+  totalValue: number;
+  /** Row count and how much of the total sits in the low-stock items. */
+  itemCount: number;
+  lowStockCount: number;
+  lowStockValue: number;
+  byCategory: Array<{ category: string; itemCount: number; value: number }>;
+}
+
+/** Purchases in a period — the money that left for stock (4.G). */
+export interface PurchaseReportRow {
+  purchaseId: number;
+  purchaseNo: string;
+  purchasedOn: string;
+  supplierName: string | null;
+  billNo: string;
+  subtotal: number;
+  extraCharges: number;
+  total: number;
+  paidAmount: number;
+  outstanding: number;
+  paymentMethod: PaymentMethod;
+  status: PurchaseStatus;
+  lineCount: number;
+}
+
+export interface PurchaseReport {
+  from: string;
+  to: string;
+  rows: PurchaseReportRow[];
+  /** Cash actually paid, excluding voided bills. */
+  paid: number;
+  /** Total value of the purchases received, excluding voided bills. */
+  received: number;
+  /** What is still owed on credit purchases. */
+  outstanding: number;
+  voidedCount: number;
+  voidedValue: number;
+  bySupplier: Array<{ supplierName: string | null; count: number; total: number; outstanding: number }>;
+}
+
+/** The wastage report plus a per-day trend, so the owner sees a bad month (4.G). */
+export interface WastageReportFull extends WastageOverview {
+  byDay: Array<{ date: string; qty: number; value: number }>;
+  /** The reason that cost the most this period, or null when nothing was wasted. */
+  worstReason: { reason: WastageReason; value: number } | null;
+}
+
+/** Expenses in a period, grouped for the report tab (4.G). */
+export interface ExpenseReport {
+  from: string;
+  to: string;
+  total: number;
+  count: number;
+  byCategory: ExpenseSummaryRow[];
+  byPaidFrom: Array<{ paidFrom: ExpensePaidFrom; count: number; total: number }>;
+  byDay: Array<{ date: string; count: number; total: number }>;
+  voidedCount: number;
+  voidedValue: number;
+}
+
 export interface ReportsApi {
   dashboard(): Promise<ApiResult<DashboardStats>>;
   profitAndLoss(range: DateRange): Promise<ApiResult<ProfitAndLoss>>;
@@ -1548,11 +1696,30 @@ export interface ReportsApi {
   salarySummary(month: string): Promise<ApiResult<SalarySummaryRow[]>>;
   deliveryReport(range: DateRange): Promise<ApiResult<DeliveryReportRow[]>>;
   vehicleExpenses(range: DateRange): Promise<ApiResult<VehicleExpenseRow[]>>;
+  itemProfit(range: DateRange): Promise<ApiResult<ItemProfitRow[]>>;
+  stockValuation(): Promise<ApiResult<StockValuation>>;
+  purchaseReport(range: DateRange): Promise<ApiResult<PurchaseReport>>;
+  wastageReport(range: DateRange): Promise<ApiResult<WastageReportFull>>;
+  expenseReport(range: DateRange): Promise<ApiResult<ExpenseReport>>;
   exportCsv(
-    report: 'daily_sales' | 'top_items' | 'salary' | 'delivery' | 'vehicle_expenses',
+    report: ExportReportName,
     range: DateRange,
   ): Promise<ApiResult<{ path: string | null }>>;
 }
+
+/** The reports that can be written to a CSV file. */
+export type ExportReportName =
+  | 'daily_sales'
+  | 'top_items'
+  | 'salary'
+  | 'delivery'
+  | 'vehicle_expenses'
+  | 'profit'
+  | 'item_profit'
+  | 'stock_value'
+  | 'purchases'
+  | 'wastage'
+  | 'expenses';
 
 export interface SettingsApi {
   get(): Promise<ApiResult<ShopSettings>>;
@@ -1683,6 +1850,11 @@ export const CHANNELS = {
   reportDelivery: 'reports:delivery',
   reportVehicleExpenses: 'reports:vehicle-expenses',
   reportExport: 'reports:export',
+  reportItemProfit: 'reports:item-profit',
+  reportStockValuation: 'reports:stock-valuation',
+  reportPurchases: 'reports:purchases',
+  reportWastage: 'reports:wastage',
+  reportExpenses: 'reports:expenses',
 
   settingsGet: 'settings:get',
   settingsSave: 'settings:save',

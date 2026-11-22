@@ -809,7 +809,10 @@ export function createOrdersRepository(db: AppDatabase) {
         }>(`
           SELECT
             COALESCE(SUM(CASE WHEN bad.unknown = 0 THEN bad.net_sales END), 0) AS cogs_sales,
-            COALESCE(SUM(bad.cost), 0) AS cogs,
+            -- Only fully-costed bills. Summing every bill's cost would charge the
+            -- known half of a mixed bill against sales that were excluded as
+            -- unknown, and the P&L would report a loss that never happened.
+            COALESCE(SUM(CASE WHEN bad.unknown = 0 THEN bad.cost END), 0) AS cogs,
             COALESCE(SUM(CASE WHEN bad.unknown > 0 THEN bad.net_sales END), 0) AS unknown_sales,
             COALESCE(SUM(CASE WHEN bad.unknown > 0 THEN 1 ELSE 0 END), 0) AS unpriced_bills,
             COALESCE(SUM(bad.unknown), 0) AS unpriced_lines
@@ -861,6 +864,55 @@ export function createOrdersRepository(db: AppDatabase) {
         wastageQty: wastage?.qty ?? 0,
         wastageValue: wastage?.value ?? 0,
       };
+    },
+
+    /**
+     * Per-item profitability (4.G).
+     *
+     * Grouped by the snapshot on the SOLD line, not by the recipe: a bill keeps
+     * the cost it was charged, so editing a recipe today cannot improve yesterday's
+     * margin. Menu items with no recipe have `cost_total IS NULL` on their lines,
+     * which is exactly why the row reports priced and unpriced revenue separately
+     * instead of treating a missing cost as free food.
+     */
+    itemProfit(fromDate: string, toDate: string) {
+      return db
+        .prepare(
+          `SELECT oi.item_id AS itemId,
+                  oi.name AS name,
+                  SUM(oi.qty) AS qty,
+                  SUM(oi.line_total) AS revenue,
+                  COALESCE(SUM(CASE WHEN oi.cost_total IS NOT NULL THEN oi.line_total END), 0)
+                    AS pricedRevenue,
+                  COALESCE(SUM(oi.cost_total), 0) AS cost,
+                  COALESCE(SUM(CASE WHEN oi.cost_total IS NULL THEN oi.qty END), 0) AS unpricedQty,
+                  COALESCE(SUM(CASE WHEN oi.cost_total IS NULL THEN oi.line_total END), 0)
+                    AS unpricedRevenue,
+                  -- Does the item have a recipe RIGHT NOW? A line sold before the
+                  -- recipe existed has no cost, but the owner has already fixed the
+                  -- cause — telling them "no recipe" would send them hunting for a
+                  -- problem that no longer exists.
+                  EXISTS (
+                    SELECT 1 FROM recipe_items r
+                     WHERE r.item_id = oi.item_id
+                  ) AS hasRecipeNow
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+            WHERE o.status <> 'cancelled' AND date(o.created_at) BETWEEN ? AND ?
+            GROUP BY COALESCE(oi.item_id, -1), oi.name
+            ORDER BY revenue DESC`,
+        )
+        .all(fromDate, toDate) as Array<{
+        itemId: number | null;
+        name: string;
+        qty: number;
+        revenue: number;
+        pricedRevenue: number;
+        cost: number;
+        unpricedQty: number;
+        unpricedRevenue: number;
+        hasRecipeNow: number;
+      }>;
     },
 
     deliveriesByBoy(fromDate: string, toDate: string) {

@@ -231,6 +231,29 @@ export function createStockOpsRepository(db: AppDatabase) {
       };
     },
 
+    /**
+     * Wastage grouped by the day it happened (4.G report trend).
+     *
+     * `created_at` carries the shop's local time; `happened_on`-style backdating
+     * is not stored on a movement, so the trend follows when the row was written.
+     * That is the same date the P&L filters on, so the two agree.
+     */
+    wastageByDay(fromDate: string, toDate: string): Array<{ date: string; qty: number; value: number }> {
+      const rows = db
+        .prepare(
+          `SELECT date(created_at) AS date,
+                  COALESCE(SUM(ABS(qty)), 0) AS qty,
+                  COALESCE(SUM(ABS(ROUND(qty * unit_cost_milli / 1000))), 0) AS value
+             FROM stock_movements
+            WHERE kind = 'wastage' AND date(created_at) BETWEEN ? AND ?
+            GROUP BY date(created_at)
+            ORDER BY date(created_at)`,
+        )
+        .all(fromDate, toDate) as Array<{ date: string; qty: number; value: number }>;
+
+      return rows;
+    },
+
     transaction<T>(fn: () => T): T {
       return db.transaction(fn)();
     },

@@ -112,6 +112,9 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     staff: repositories.staff,
     vehicles: repositories.vehicles,
     staffService,
+    inventory: repositories.inventory,
+    stockOps: repositories.stockOps,
+    missingRecipes: () => repositories.catalog.countPricedItemsWithoutRecipe(),
   });
 
   const csvService = createCsvService({
@@ -284,6 +287,8 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     repositories,
     auth,
     registry,
+    /** The CSV service, so a report test can prove the file, not just the screen. */
+    csv: csvService,
     migrationsApplied,
     call,
     callOk,

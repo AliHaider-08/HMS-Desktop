@@ -109,6 +109,9 @@ const reportsService = load('services/reportsService.js').createReportsService({
   staff: repos.staff,
   vehicles: repos.vehicles,
   staffService,
+  inventory: repos.inventory,
+  stockOps: repos.stockOps,
+  missingRecipes: () => repos.catalog.countPricedItemsWithoutRecipe(),
 });
 
 const registry = buildRegistry({

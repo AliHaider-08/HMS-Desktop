@@ -253,7 +253,19 @@ export const dateRangeSchema = z
 export const monthSchema = z.object({ month: monthField });
 
 export const exportReportSchema = z.object({
-  report: z.enum(['daily_sales', 'top_items', 'salary', 'delivery', 'vehicle_expenses']),
+  report: z.enum([
+    'daily_sales',
+    'top_items',
+    'salary',
+    'delivery',
+    'vehicle_expenses',
+    'profit',
+    'item_profit',
+    'stock_value',
+    'purchases',
+    'wastage',
+    'expenses',
+  ]),
   range: dateRangeSchema,
 });
 

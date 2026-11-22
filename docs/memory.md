@@ -7,10 +7,10 @@
 Fast Food Management Desktop App (Electron + React + SQLite)
 
 ## Current Status
-- Current phase: **Roadmap Phase 4 — 4.A → 4.F done, 4.G P&L done; the rest of 4.G is next.**
+- Current phase: **Roadmap Phase 4 complete — 4.A → 4.G all done (376 checks / 22 suites).**
 - Original six phases and the roadmap hardening are complete and merged.
-- File currently being worked on: `docs/memory.md` (last code files: `src/pages/Stock/WastageTab.tsx`,
-  `src/pages/Stock/StockCountsTab.tsx`, `scripts/test-phase21.mjs`)
+- File currently being worked on: `docs/memory.md` (last code files: `src/pages/Reports/ProfitPanels.tsx`,
+  `src/pages/Reports/SpendPanels.tsx`, `scripts/test-phase22.mjs`)
 - App runs offline; data file: `%APPDATA%\gul-khan-fast-food\data\fastfood.db`
 - Logs: `%APPDATA%\gul-khan-fast-food\logs\app.log`
 - Backups: `%APPDATA%\gul-khan-fast-food\backups\` (auto on close, keeps last 7)
@@ -62,7 +62,8 @@ PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all
 
 ## Verification (headless)
 `npm run verify` runs typecheck + lint + all phase tests.
-Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across repeated runs.
+Last result: **376 checks passed, 0 failed across 22 suites** (`npm run test:all`), stable across
+repeated runs.
 
 | Suite | Checks |
 | --- | --- |
@@ -73,6 +74,7 @@ Last result: **107 checks passed, 0 failed** (`npm run test:all`), stable across
 | Phase 5 (`scripts/test-phase5.mjs`) | 13 |
 | Phase 6 (`scripts/test-phase6.mjs`) | 13 |
 | Phase 7 (`scripts/test-phase7.mjs`) | 17 |
+| Phase 8–22 (roadmap, hardening, Phase 4) | 240 |
 
 ## Decisions Made
 - Electron 45, React 19, Vite 7, TypeScript 5.9, Tailwind 3, Zustand 5, React Router 7 (hash
@@ -269,7 +271,7 @@ The five things that were fine in a demo and wrong in a shop. Each has a test in
 
 ## Phase 4 — Inventory, recipes and expenses (migrations 015–021)
 
-The client's six requirements, in the app. 358 checks across 21 suites, `npm run verify` green.
+The client's six requirements, in the app. 376 checks across 22 suites, `npm run verify` green.
 
 ### What exists now
 
@@ -324,6 +326,14 @@ The client's six requirements, in the app. 358 checks across 21 suites, `npm run
   The report the owner actually asked for: `net sales (ex tax, after discounts) − cost of
   food = gross profit`, then `− shop expenses = net profit`. One tab on the Reports page,
   marked "Profit & loss", opens first.
+- **4.G part two — the reporting set** (no migration, phase22, 18 checks).
+  Five more report channels behind `costs:read` (`reports:item-profit`, `reports:stock-valuation`,
+  `reports:purchases`, `reports:wastage`, `reports:expenses`), five new tabs on Reports, four
+  dashboard cards and CSV for all six reports. Every number is made to **reconcile with the P&L**
+  rather than be computed independently, and the suite asserts three of those equalities:
+  item-profit priced revenue = `knownNetSales`, its cost = `cogs`, expense total = `shopExpenses`,
+  wastage total = `wastageValue`. Stock valuation reads through the same `listIngredients()` the
+  Stock page uses, so the two totals cannot drift.
 
 ### The two rules the P&L lives or dies by
 
@@ -339,6 +349,17 @@ The client's six requirements, in the app. 358 checks across 21 suites, `npm run
 
 ### Gotchas that cost time (do not relearn these)
 
+- **`cogs` must sum only fully-costed bills.** The first version summed every bill's cost while
+  `knownNetSales` counted only the costed bills' sales, so a mixed bill (one costed line, one
+  without a recipe) charged real cost against sales that had been excluded — and the P&L showed a
+  loss on a day that made money. Phase 20's original assertion (`grossProfit = knownNetSales −
+  cogs`) could not catch it, because it holds even when `cogs` is wrong; the test now compares
+  `cogs` against a SQL rebuild that filters `unknown = 0`. Reverting the fix makes the suite fail.
+- **A dashboard profit card must be `null`, never negative, when nothing could be costed.** A day
+  with sales but no costed bill has unknown profit; `knownNetSales === 0` is the test for it.
+- **`hasRecipe` is about the item today, `unpricedReason` is about the bill.** An item sold before
+  its recipe existed has unpriced lines forever (a recipe is not a time machine) but is not a
+  problem to fix — telling the owner "no recipe" sends them hunting for something already done.
 - **`GROUP BY` must come after `WHERE`.** Adding the cost aggregate to `ORDER_SELECT` put
   `GROUP BY o.id` inside the shared string, and every filtered order query then died with
   `near "WHERE": syntax error`. It is a separate `ORDER_GROUP` constant appended after the filter.
@@ -367,7 +388,9 @@ The client's six requirements, in the app. 358 checks across 21 suites, `npm run
 
 ## Last Updated
 - Date: 2026-11-22
-- By: Arena Agent (Phase 4 — 4.A to 4.F, 4.G P&L). All six client requirements delivered plus
-  wastage/adjustments/stock counts; 358 checks across 21 suites; `npm run verify` green.
-- Remaining in Phase 4: the non-P&L half of 4.G (item profitability table, stock valuation,
-  purchases/wastage/expense report tabs, dashboard cards, CSV export).
+- By: Arena Agent (Phase 4 — 4.A to 4.G). All six client requirements delivered, plus wastage /
+  adjustments / stock counts and the full reporting set; 376 checks across 22 suites;
+  `npm run verify` green. Phase 4 is complete.
+- Open next: the eight client questions in `docs/inventory-expenses-plan.md` §15 (portions,
+  who sees profit, supplier credit, in-house sauces, opening stock, recurring bills) and the
+  deferred 4.E2 items (recurring bills, owner drawings).

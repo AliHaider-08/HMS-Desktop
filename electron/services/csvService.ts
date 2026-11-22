@@ -1,12 +1,11 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { DateRange, ReportBundle } from '../../src/types/api';
+import type { DateRange, ExportReportName, ReportBundle } from '../../src/types/api';
 import type { ReportsService } from './reportsService';
 import { formatAmount } from '../utils/money';
 import { logInfo } from './logger';
 
-export type ExportReportName =
-  'daily_sales' | 'top_items' | 'salary' | 'delivery' | 'vehicle_expenses';
+export type { ExportReportName };
 
 const HEADERS: Record<ExportReportName, string[]> = {
   daily_sales: ['Date', 'Orders', 'Sales'],
@@ -14,6 +13,13 @@ const HEADERS: Record<ExportReportName, string[]> = {
   salary: ['Name', 'Role', 'Month', 'Net pay', 'Paid'],
   delivery: ['Delivery boy', 'Deliveries', 'Delivered value', 'Commission'],
   vehicle_expenses: ['Vehicle', 'Fuel', 'Maintenance', 'Other', 'Total', 'Entries'],
+  // 4.G — the owner's own numbers.
+  profit: ['Line', 'Amount'],
+  item_profit: ['Item', 'Qty sold', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Unpriced revenue'],
+  stock_value: ['Ingredient', 'Category', 'On hand', 'Unit', 'Average cost', 'Value', 'Low stock'],
+  purchases: ['Date', 'Purchase', 'Supplier', 'Bill', 'Total', 'Paid', 'Outstanding', 'Status'],
+  wastage: ['Ingredient', 'Reason', 'Times', 'Quantity', 'Value'],
+  expenses: ['Category', 'Entries', 'Total'],
 };
 
 /** Escapes one CSV cell; quotes values that contain a comma, quote or newline. */
@@ -110,6 +116,94 @@ export function createCsvService(deps: {
                 formatAmount(row.total),
                 row.entries,
               ]),
+          );
+
+        /*
+         * 4.G: the five new reports. Rupees go out (not paisa) because the file is
+         * opened in Excel by a shopkeeper, matching every other export here.
+         */
+
+        case 'profit': {
+          const pnl = reports.profitAndLoss(range);
+          return toCsv(HEADERS.profit, [
+            ['Net sales (ex tax)', formatAmount(pnl.netSales)],
+            ['  of which costed', formatAmount(pnl.knownNetSales)],
+            ['  of which unpriced', formatAmount(pnl.unknownNetSales)],
+            ['Cost of food sold', formatAmount(pnl.cogs)],
+            ['Gross profit', formatAmount(pnl.grossProfit)],
+            ['Shop expenses', formatAmount(pnl.shopExpenses)],
+            ['Net profit', formatAmount(pnl.netProfit)],
+            ['Tax collected (not income)', formatAmount(pnl.tax)],
+            ['Bills', pnl.orderCount],
+            ['Wastage written off', formatAmount(pnl.wastageValue)],
+            ['Cancelled bills', pnl.cancelledCount],
+          ]);
+        }
+
+        case 'item_profit':
+          return toCsv(
+            HEADERS.item_profit,
+            reports.itemProfit(range).map((row) => [
+              row.name,
+              row.qty,
+              formatAmount(row.revenue),
+              formatAmount(row.cost),
+              formatAmount(row.profit),
+              row.marginX100 === null ? '' : (row.marginX100 / 100).toFixed(2),
+              formatAmount(row.unpricedRevenue),
+            ]),
+          );
+
+        case 'stock_value':
+          return toCsv(
+            HEADERS.stock_value,
+            reports.stockValuation().rows.map((row) => [
+              row.name,
+              row.category,
+              row.qtyOnHand,
+              row.baseUnit,
+              // Average cost is milli-paisa per base unit; show rupees.
+              (row.avgCostMilli / 100_000).toFixed(2),
+              formatAmount(row.value),
+              row.lowStock ? 'Yes' : 'No',
+            ]),
+          );
+
+        case 'purchases':
+          return toCsv(
+            HEADERS.purchases,
+            reports.purchaseReport(range).rows.map((row) => [
+              row.purchasedOn,
+              row.purchaseNo,
+              row.supplierName ?? '',
+              row.billNo,
+              formatAmount(row.total),
+              formatAmount(row.paidAmount),
+              formatAmount(row.outstanding),
+              row.status,
+            ]),
+          );
+
+        case 'wastage':
+          return toCsv(
+            HEADERS.wastage,
+            reports.wastageReport(range).rows.map((row) => [
+              row.ingredientName,
+              row.reason,
+              row.movements,
+              row.qty,
+              formatAmount(row.value),
+            ]),
+          );
+
+        case 'expenses':
+          return toCsv(
+            HEADERS.expenses,
+            reports.expenseReport(range).byCategory.map((row) => [
+              row.categoryName,
+              row.count,
+              formatAmount(row.total),
+            ]),
           );
 
         default:

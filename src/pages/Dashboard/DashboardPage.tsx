@@ -4,10 +4,13 @@ import {
   ArrowRight,
   Bike,
   ClipboardList,
+  Package,
   Plus,
   ShoppingBag,
   TrendingUp,
   Utensils,
+  UtensilsCrossed,
+  Wallet,
 } from 'lucide-react';
 import type { OrderSummary } from '../../types/api';
 import { ORDER_STATUS_CLASSES, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../../types/labels';
@@ -86,7 +89,9 @@ function SalesSparkline({ rows }: { rows: { date: string; sales: number }[] }) {
 }
 
 export function DashboardPage() {
-  const { can, user } = useAuth();
+  const { can, allow, user } = useAuth();
+  // Cost, profit, stock value and shop expenses are the owner's numbers (4.G).
+  const canSeeCosts = allow('costs:read');
   const currency = useSettings((settings) => settings.currency);
 
   const { data, isLoading, error, reload } = useAsync(
@@ -190,6 +195,70 @@ export function DashboardPage() {
           tone="info"
         />
       </div>
+
+      {/*
+       * Roadmap 4.G cards. They only appear for a role that may see costs
+       * (`costs:read`), because every number here — the day's gross profit, the
+       * money on the shelf, today's spend — is one of the owner's private figures.
+       */}
+      {canSeeCosts && (
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label="Today's gross profit"
+            value={
+              data?.todayProfit
+                ? `${currency} ${formatAmount(data.todayProfit.grossProfit)}`
+                : '—'
+            }
+            hint={
+              data?.todayProfit
+                ? data.todayProfit.unpricedBills > 0
+                  ? `${data.todayProfit.unpricedBills} bill(s) include an item with no recipe`
+                  : 'Sales minus the cost of the food'
+                : data && data.todayOrders > 0
+                  ? 'No recipe means no cost, so no profit'
+                  : 'No bills yet today'
+            }
+            Icon={Wallet}
+            to="/reports"
+            tone="success"
+          />
+          <StatCard
+            label="Stock on the shelf"
+            value={
+              data?.stock ? `${currency} ${formatAmount(data.stock.value)}` : '—'
+            }
+            hint={
+              data?.stock
+                ? `${data.stock.lowStockCount} low · ${data.stock.outOfStockCount} out`
+                : 'No stock list yet'
+            }
+            Icon={Package}
+            to="/stock"
+            tone="primary"
+          />
+          <StatCard
+            label="Spent today"
+            value={`${currency} ${formatAmount(data?.todayExpenses ?? 0)}`}
+            hint="Rent, bills, salaries, repairs"
+            Icon={TrendingUp}
+            to="/expenses"
+            tone="accent"
+          />
+          <StatCard
+            label="Items with no recipe"
+            value={String(data?.missingRecipes ?? 0)}
+            hint={
+              (data?.missingRecipes ?? 0) > 0
+                ? 'Their profit cannot be worked out'
+                : 'Every item is costed'
+            }
+            Icon={UtensilsCrossed}
+            to={can('menu') ? '/menu' : '/orders'}
+            tone={(data?.missingRecipes ?? 0) > 0 ? 'accent' : 'info'}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">

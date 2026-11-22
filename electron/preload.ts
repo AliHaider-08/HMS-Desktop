@@ -124,6 +124,11 @@ const api: RendererApi = {
     salarySummary: (month) => invoke(CHANNELS.reportSalary, { month }),
     deliveryReport: (range) => invoke(CHANNELS.reportDelivery, range),
     vehicleExpenses: (range) => invoke(CHANNELS.reportVehicleExpenses, range),
+    itemProfit: (range) => invoke(CHANNELS.reportItemProfit, range),
+    stockValuation: () => invoke(CHANNELS.reportStockValuation),
+    purchaseReport: (range) => invoke(CHANNELS.reportPurchases, range),
+    wastageReport: (range) => invoke(CHANNELS.reportWastage, range),
+    expenseReport: (range) => invoke(CHANNELS.reportExpenses, range),
     exportCsv: (report, range) => invoke(CHANNELS.reportExport, { report, range }),
   },
 

@@ -28,6 +28,7 @@ const suites = [
   ['Phase 19 — expenses', 'test-phase19.mjs'],
   ['Phase 20 — profit & loss', 'test-phase20.mjs'],
   ['Phase 21 — wastage, adjustments, stock counts', 'test-phase21.mjs'],
+  ['Phase 22 — item profit, stock value and spend reports', 'test-phase22.mjs'],
 ];
 
 const results = [];

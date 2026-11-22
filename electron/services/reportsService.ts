@@ -3,17 +3,26 @@ import type {
   DashboardStats,
   DateRange,
   DeliveryReportRow,
+  ExpenseReport,
+  ItemProfitRow,
   ProfitAndLoss,
+  PurchaseReport,
   ReportBundle,
   SalarySummaryRow,
+  StockValuation,
+  StockValueRow,
   TopItemRow,
   VehicleExpenseRow,
+  WastageReason,
+  WastageReportFull,
 } from '../../src/types/api';
 import type { OrdersRepository } from '../db/repositories/ordersRepository';
 import type { CatalogRepository } from '../db/repositories/catalogRepository';
 import type { StaffRepository } from '../db/repositories/staffRepository';
 import type { VehiclesRepository } from '../db/repositories/vehiclesRepository';
 import type { ExpensesRepository } from '../db/repositories/expensesRepository';
+import type { InventoryRepository } from '../db/repositories/inventoryRepository';
+import type { StockOpsRepository } from '../db/repositories/stockOpsRepository';
 import type { StaffService } from './staffService';
 import { daysUntil, monthEnd, monthStart, toSqlDate, todaySqlDate } from '../utils/datetime';
 
@@ -43,8 +52,18 @@ export function createReportsService(deps: {
   staffService: StaffService;
   /** Shop expenses (4.E). Null while that migration has not run. */
   expenses?: ExpensesRepository;
+  /** Stock, for valuation and purchases (4.G). Null before 4.A. */
+  inventory?: InventoryRepository;
+  /** Wastage read model (4.F). Null before 4.F. */
+  stockOps?: StockOpsRepository;
+  /** Active menu items without a recipe — the dashboard's "profit unknown" card. */
+  missingRecipes?: () => number;
 }) {
-  const { orders, catalog, staff, vehicles, staffService, expenses } = deps;
+  const { orders, catalog, staff, vehicles, staffService, expenses, inventory, stockOps } = deps;
+
+  /** `stockValue` is a cache-backed number; round the same way the shelf does. */
+  const valueOf = (qtyOnHand: number, avgCostMilli: number): number =>
+    Math.round((qtyOnHand * avgCostMilli) / 1000);
 
   function fillDaily(
     days: string[],
@@ -94,6 +113,48 @@ export function createReportsService(deps: {
         return alerts;
       });
 
+      /*
+       * The Phase 4 cards. Today's profit is computed for TODAY only and uses the
+       * same known/unknown split as the full report — a card that silently counts an
+       * unpriced bill as free food would be worse than no card at all. Each block
+       * guards its own repository so a database that has not run 015+ still opens.
+       */
+      const todayPnl = orders.profitAndLoss(today, today);
+      /*
+       * No costed bill means no profit figure, not a zero and never a loss. A day
+       * whose only bills were items without recipes has sales we cannot price; the
+       * card must say so rather than print "−Rs 1,371 profit" on a day that sold
+       * Rs 4,000 of food.
+       */
+      const todayProfit =
+        todayPnl.knownNetSales === 0
+          ? null
+          : {
+              knownNetSales: todayPnl.knownNetSales,
+              cogs: todayPnl.cogs,
+              grossProfit: todayPnl.knownNetSales - todayPnl.cogs,
+              unpricedBills: todayPnl.unpricedBills,
+            };
+
+      const stock = inventory
+        ? {
+            value: inventory.stockValueTotal(),
+            lowStockCount: inventory.lowStockCount(),
+            outOfStockCount: inventory.outOfStockCount(),
+          }
+        : null;
+
+      const todayExpenses = expenses?.summary(today, today).total ?? 0;
+
+      const priceChecks = (inventory?.priceRises(toSqlDate(new Date(Date.now() - 30 * 86_400_000))) ?? [])
+        .map((row) => ({
+          ...row,
+          changeX100:
+            row.oldCostMilli > 0
+              ? Math.round(((row.newCostMilli - row.oldCostMilli) * 10_000) / row.oldCostMilli)
+              : 0,
+        }));
+
       return {
         todaySales: todayTotals.sales,
         todayOrders: todayTotals.orders,
@@ -104,6 +165,11 @@ export function createReportsService(deps: {
         expiringVehicles: expiringVehicles.sort((a, b) => a.daysLeft - b.daysLeft),
         recentOrders: orders.recent(8),
         salesByDay: fillDaily(week.days, weekRows),
+        todayProfit,
+        stock,
+        todayExpenses,
+        missingRecipes: deps.missingRecipes?.() ?? 0,
+        priceChecks,
       };
     },
 
@@ -153,6 +219,228 @@ export function createReportsService(deps: {
         cancelledCount: sales.cancelled,
         cancelledValue: sales.cancelledValue,
         expensesByCategory: shop.rows,
+      };
+    },
+
+    /**
+     * Item profitability (4.G).
+     *
+     * Revenue and cost are read from the frozen line snapshot, so this table always
+     * reconciles with the P&L of the same period. An item whose lines carried no
+     * cost is reported with `marginX100: null` and its unpriced revenue named
+     * separately — "unknown" and "zero profit" are different facts.
+     */
+    itemProfit(range: DateRange): ItemProfitRow[] {
+      const rows = orders.itemProfit(range.fromDate, range.toDate);
+
+      return rows.map((row) => {
+        const profit = row.pricedRevenue - row.cost;
+        return {
+          itemId: row.itemId,
+          name: row.name,
+          qty: row.qty,
+          revenue: row.revenue,
+          pricedRevenue: row.pricedRevenue,
+          cost: row.cost,
+          profit,
+          marginX100:
+            row.pricedRevenue > 0
+              ? Math.round((profit * 10_000) / row.pricedRevenue)
+              : null,
+          unpricedQty: row.unpricedQty,
+          unpricedRevenue: row.unpricedRevenue,
+          /*
+           * Two different problems hide behind an unpriced line, and the owner's
+           * next action differs:
+           *
+           *   * no recipe at all  → add the recipe (the card on the dashboard counts
+           *     these), and future sales will be costed;
+           *   * recipe added later → nothing is wrong now, the old bills simply
+           *     predate it. Amending a bill is the only way to price it, and that
+           *     is a deliberate act.
+           */
+          hasRecipe: row.hasRecipeNow === 1,
+          unpricedReason:
+            row.unpricedQty === 0
+              ? null
+              : row.hasRecipeNow === 1
+                ? 'sold_before_recipe'
+                : 'no_recipe',
+        };
+      });
+    },
+
+    /**
+     * What is on the shelf and what it is worth (4.G).
+     *
+     * Reads the cache (`ingredients.qty_on_hand`) through the same list the Stock
+     * page uses, so the total here and the "Stock value" tile there can never
+     * differ. `lowStockValue` answers the question the count alone cannot: how much
+     * of my money is sitting in things I am about to run out of?
+     */
+    stockValuation(): StockValuation {
+      if (!inventory) {
+        return {
+          rows: [],
+          totalValue: 0,
+          itemCount: 0,
+          lowStockCount: 0,
+          lowStockValue: 0,
+          byCategory: [],
+        };
+      }
+
+      const rows: StockValueRow[] = inventory
+        .listIngredients()
+        .filter((ingredient) => ingredient.active)
+        .map((ingredient) => ({
+          ingredientId: ingredient.id,
+          name: ingredient.name,
+          category: ingredient.category,
+          baseUnit: ingredient.baseUnit,
+          purchaseUnit: ingredient.purchaseUnit,
+          unitsPerPurchase: ingredient.unitsPerPurchase,
+          qtyOnHand: ingredient.qtyOnHand,
+          avgCostMilli: ingredient.avgCostMilli,
+          value: valueOf(ingredient.qtyOnHand, ingredient.avgCostMilli),
+          reorderLevel: ingredient.reorderLevel,
+          lowStock: ingredient.lowStock,
+          supplierName: ingredient.supplierName,
+        }))
+        .sort((a, b) => b.value - a.value);
+
+      const categories = new Map<string, { itemCount: number; value: number }>();
+      for (const row of rows) {
+        const current = categories.get(row.category) ?? { itemCount: 0, value: 0 };
+        categories.set(row.category, {
+          itemCount: current.itemCount + 1,
+          value: current.value + row.value,
+        });
+      }
+
+      const low = rows.filter((row) => row.lowStock);
+
+      return {
+        rows,
+        totalValue: rows.reduce((total, row) => total + row.value, 0),
+        itemCount: rows.length,
+        lowStockCount: low.length,
+        lowStockValue: low.reduce((total, row) => total + row.value, 0),
+        byCategory: Array.from(categories.entries())
+          .map(([category, value]) => ({ category, ...value }))
+          .sort((a, b) => b.value - a.value),
+      };
+    },
+
+    /** Purchases in a period, what was paid and what is still owed (4.G). */
+    purchaseReport(range: DateRange): PurchaseReport {
+      const built = inventory?.purchaseReportRows(range.fromDate, range.toDate) ?? {
+        rows: [],
+        voidedCount: 0,
+        voidedValue: 0,
+      };
+
+      const live = built.rows.filter((row) => row.status === 'posted');
+      const bySupplier = new Map<
+        string,
+        { supplierName: string | null; count: number; total: number; outstanding: number }
+      >();
+
+      for (const row of live) {
+        const key = row.supplierName ?? '';
+        const current = bySupplier.get(key) ?? {
+          supplierName: row.supplierName,
+          count: 0,
+          total: 0,
+          outstanding: 0,
+        };
+        bySupplier.set(key, {
+          supplierName: row.supplierName,
+          count: current.count + 1,
+          total: current.total + row.total,
+          outstanding: current.outstanding + row.outstanding,
+        });
+      }
+
+      return {
+        from: range.fromDate,
+        to: range.toDate,
+        rows: built.rows,
+        // Money is counted over posted bills only; a voided delivery is not a cost.
+        paid: live.reduce((total, row) => total + row.paidAmount, 0),
+        received: live.reduce((total, row) => total + row.total, 0),
+        outstanding: live.reduce((total, row) => total + row.outstanding, 0),
+        voidedCount: built.voidedCount,
+        voidedValue: built.voidedValue,
+        bySupplier: Array.from(bySupplier.values()).sort((a, b) => b.total - a.total),
+      };
+    },
+
+    /**
+     * The wastage report, with the two additions the report screen needs (4.G):
+     * a per-day trend so a bad week is visible, and the single reason that cost
+     * the most. The rows and totals come from the 4.F read model untouched, so the
+     * Wastage tab on Stock and this tab can never disagree.
+     */
+    wastageReport(range: DateRange): WastageReportFull {
+      const read = stockOps?.wastageReport(range.fromDate, range.toDate);
+      const base = {
+        from: range.fromDate,
+        to: range.toDate,
+        rows: read?.rows ?? ([] as WastageReportFull['rows']),
+        total: read?.total ?? 0,
+        qty: read?.qty ?? 0,
+      };
+
+      const days = stockOps?.wastageByDay(range.fromDate, range.toDate) ?? [];
+
+      const byReason = new Map<WastageReason, number>();
+      for (const row of base.rows) {
+        byReason.set(row.reason, (byReason.get(row.reason) ?? 0) + row.value);
+      }
+      const worst = Array.from(byReason.entries()).sort((a, b) => b[1] - a[1])[0];
+
+      return {
+        ...base,
+        byDay: days,
+        worstReason: worst ? { reason: worst[0], value: worst[1] } : null,
+      };
+    },
+
+    /** Expenses in a period, grouped by category, by wallet and by day (4.G). */
+    expenseReport(range: DateRange): ExpenseReport {
+      const rows = expenses?.list({ from: range.fromDate, to: range.toDate, status: 'all' }) ?? [];
+      const active = rows.filter((row) => row.status === 'active');
+      const voided = rows.filter((row) => row.status === 'void');
+
+      const byPaidFrom = new Map<string, { count: number; total: number }>();
+      const byDay = new Map<string, { count: number; total: number }>();
+
+      for (const row of active) {
+        const wallet = byPaidFrom.get(row.paidFrom) ?? { count: 0, total: 0 };
+        byPaidFrom.set(row.paidFrom, { count: wallet.count + 1, total: wallet.total + row.amount });
+
+        const day = byDay.get(row.spentOn) ?? { count: 0, total: 0 };
+        byDay.set(row.spentOn, { count: day.count + 1, total: day.total + row.amount });
+      }
+
+      return {
+        from: range.fromDate,
+        to: range.toDate,
+        total: active.reduce((total, row) => total + row.amount, 0),
+        count: active.length,
+        byCategory: expenses?.summary(range.fromDate, range.toDate).rows ?? [],
+        byPaidFrom: Array.from(byPaidFrom.entries())
+          .map(([paidFrom, value]) => ({
+            paidFrom: paidFrom as ExpenseReport['byPaidFrom'][number]['paidFrom'],
+            ...value,
+          }))
+          .sort((a, b) => b.total - a.total),
+        byDay: Array.from(byDay.entries())
+          .map(([date, value]) => ({ date, ...value }))
+          .sort((a, b) => a.date.localeCompare(b.date)),
+        voidedCount: voided.length,
+        voidedValue: voided.reduce((total, row) => total + row.amount, 0),
       };
     },
 

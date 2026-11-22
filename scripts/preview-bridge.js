@@ -85,6 +85,11 @@
       salarySummary: call('reports:salary'),
       deliveryReport: call('reports:delivery'),
       vehicleExpenses: call('reports:vehicle-expenses'),
+      itemProfit: call('reports:item-profit'),
+      stockValuation: call('reports:stock-valuation'),
+      purchaseReport: call('reports:purchases'),
+      wastageReport: call('reports:wastage'),
+      expenseReport: call('reports:expenses'),
       exportCsv: call('reports:export'),
     },
     settings: {

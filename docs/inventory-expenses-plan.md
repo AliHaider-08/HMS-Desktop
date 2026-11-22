@@ -256,19 +256,44 @@ Each sub-phase has its own migration, test script, `npm run verify` gate and a `
 | **4.D** | Automatic deduction | Deduct on order save, `order_item_stock` snapshot, `order_items.cost_total`, cancel rules (prepared / not prepared), amend re-valuation, negative-stock setting, per-order profit | `019_deduction.sql` | `test-phase18.mjs` | **done** |
 | **4.E** | Shop expenses | Categories, entry, drawer link, void with audit, recurring bills (4.E2), drawings (4.E2) | `020_expenses.sql` | `test-phase19.mjs` | **done** |
 | **4.F** | Wastage, adjustments, stock count | Wastage entry (reason codes + notes + dated at average cost), stock count with frozen variance (the shelf is SET to the counted qty), adjustment ledger, supplier return via the existing `supplier_return` kind, wastage report by ingredient+reason, Wastage + Stock counts tabs | `021_stock_ops.sql` | `test-phase21.mjs` | **done** (15 checks) |
-| **4.G** | Profit and reports | **P&L done** (`reports:profit`, Profit & loss tab on Reports). Still open: item profitability table, stock valuation, purchases/wastage/expense report tabs, dashboard cards, CSV | none | `test-phase20.mjs` | **partly done** |
+| **4.G** | Profit and reports | P&L (`reports:profit`), item profitability, stock valuation, purchases / wastage / expenses report tabs, four dashboard cards, CSV export for all six | none | `test-phase20.mjs` + `test-phase22.mjs` | **done** |
 
-**Status: all six client requirements are delivered.** 1 stock entry (4.A), 2 recipes (4.C),
-3 automatic deduction (4.D), 4 purchase prices + history (4.B), 5 cost vs price vs profit
-(4.C + 4.G), 6 shop expenses (4.E). 4.F is finished too (wastage, adjustments, counts), so
-what remains is the non-P&L half of 4.G: item profitability, stock valuation, report tabs,
-dashboard cards and CSV export.
+**Status: Phase 4 is complete.** All six client requirements are delivered (1 stock entry 4.A,
+2 recipes 4.C, 3 automatic deduction 4.D, 4 purchase prices + history 4.B, 5 cost vs price vs
+profit 4.C + 4.G, 6 shop expenses 4.E) and the two extras the plan added along the way — wastage,
+adjustments and stock counts (4.F), and the full reporting set (4.G) — are finished as well.
+Next: `docs/inventory-expenses-plan.md` §15 lists the eight questions still open for the client;
+nothing in the build is blocked on them.
 
 Migration numbering (authoritative): 015 inventory, 016 purchases, 017 cash↔purchase link, 018 recipes, 019 deduction, **020 expenses**, **021 stock ops**.
 
 Scope note: 4.E (expenses) is built before 4.F (wastage/count) because expenses is the client's sixth requirement and wastage was not asked for; the P&L in 4.G needs both, so the order only changes the schedule, not the result.
 
 Order of work: **4.A → 4.D is the heart of the client's request.** 4.E and 4.F are independent and small; 4.G last because it needs their data.
+
+### 4.G contract, as built
+
+Five report channels, all behind `costs:read` (the owner's private numbers, never a manager's):
+`reports:item-profit`, `reports:stock-valuation`, `reports:purchases`, `reports:wastage`,
+`reports:expenses`. CSV covers all six reports including the P&L (`exportReportSchema`).
+
+- **Item profit** groups by the frozen line snapshot, so it reconciles with the P&L of the same
+  period to the paisa (the test asserts exactly that). An unpriced line reports
+  `marginX100: null` — never 100% — and `unpricedReason` distinguishes *no recipe* (fix it: add
+  one) from *sold before the recipe existed* (fixed already; only an amendment can price the
+  old bill). Those are different problems and the owner should not be sent hunting for a
+  problem that no longer exists.
+- **Stock valuation** reads through the same list the Stock page uses, so the two totals can
+  never disagree, and adds `lowStockValue` — how much money is tied up in things about to run out.
+- **Purchases** counts posted bills only; a voided delivery is reported in `voidedCount` /
+  `voidedValue` and never as money. `outstanding` is credit-only, because a cash bill is settled
+  at the counter.
+- **Wastage** reuses the 4.F read model untouched (so the Stock tab and the Reports tab cannot
+  disagree) and adds a per-day trend plus the worst reason.
+- **Expenses** groups by category, by wallet (drawer / bank / outside) and by day; a voided
+  expense leaves the total but stays visible in `voidedCount`.
+- **Dashboard cards** (only for `costs:read`): today's gross profit, stock on the shelf, money
+  spent today, items with no recipe, plus ingredient price rises over 30 days.
 
 ### 4.F contract, as built
 

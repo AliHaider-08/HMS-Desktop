@@ -316,6 +316,38 @@ await runner.check('an unpriced bill is set aside, not silently counted as free'
     throw new Error('gross profit used sales it could not cost');
   }
 
+  /*
+   * `cogs` must contain the cost of COSTED bills only.
+   *
+   * The mixed bill has one priced line (the burger) and one unpriced (the fries).
+   * Its sales are excluded from `knownNetSales` because the bill cannot be priced
+   * as a whole — so its burger cost must be excluded from `cogs` too. Summing
+   * every bill's cost while counting only the costed bills' sales charges a real
+   * cost against sales that were set aside, and the P&L reports a loss on a day
+   * that made money. That is a silent lie, so it is pinned here.
+   */
+  const pricedBillsCost = harness.db
+    .prepare(
+      `SELECT COALESCE(SUM(bill.cost), 0) AS total
+         FROM (
+           SELECT o.id, SUM(CASE WHEN oi.cost_total IS NULL THEN 1 ELSE 0 END) AS unknown,
+                  COALESCE(SUM(oi.cost_total), 0) AS cost
+             FROM orders o
+             JOIN order_items oi ON oi.order_id = o.id
+            WHERE o.status <> 'cancelled' AND date(o.created_at) BETWEEN ? AND ?
+            GROUP BY o.id
+         ) bill
+        WHERE bill.unknown = 0`,
+    )
+    .get(range.fromDate, range.toDate);
+
+  if (report.cogs !== pricedBillsCost.total) {
+    throw new Error(
+      `cogs ${report.cogs} includes cost from a bill whose sales were excluded ` +
+        `(${pricedBillsCost.total} is the honest figure)`,
+    );
+  }
+
   // Giving the fries a recipe makes the whole period known again.
   const oil = await ingredientWithPrice({
     name: 'Frying oil',

@@ -240,6 +240,9 @@ async function bootstrapServices(): Promise<void> {
     staff: staffRepo,
     vehicles: vehiclesRepo,
     staffService,
+    inventory: inventoryRepo,
+    stockOps: stockOpsRepo,
+    missingRecipes: () => catalogRepo.countPricedItemsWithoutRecipe(),
   });
 
   const csvService = createCsvService({
