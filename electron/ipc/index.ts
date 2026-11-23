@@ -14,6 +14,9 @@ import type { ShiftsService } from '../services/shiftsService';
 import type { DiscountsService } from '../services/discountsService';
 import type { KotService } from '../services/kotService';
 import type { TablesService } from '../services/tablesService';
+import type { InventoryService } from '../services/inventoryService';
+import type { RecipeService } from '../services/recipeService';
+import type { ExpensesService } from '../services/expensesService';
 import { authHandlers } from './auth.ipc';
 import { menuHandlers } from './menu.ipc';
 import { ordersHandlers } from './orders.ipc';
@@ -27,6 +30,10 @@ import { shiftsHandlers } from './shifts.ipc';
 import { discountsHandlers } from './discounts.ipc';
 import { kotHandlers } from './kot.ipc';
 import { tablesHandlers } from './tables.ipc';
+import { stockHandlers } from './stock.ipc';
+import type { SubRecipeService } from '../services/subRecipeService';
+import { recipesHandlers } from './recipes.ipc';
+import { expensesHandlers } from './expenses.ipc';
 import type { HandlerRegistry } from './registry';
 
 export interface IpcServices {
@@ -46,6 +53,11 @@ export interface IpcServices {
   discounts: DiscountsService;
   kot: KotService;
   tables: TablesService;
+  inventory: InventoryService;
+  recipes: RecipeService;
+  expenses: ExpensesService;
+  /** Sub-recipes (4.I). Optional: a database that has not run 023 lacks them. */
+  subRecipes?: SubRecipeService;
 }
 
 /**
@@ -68,6 +80,9 @@ export function buildRegistry(services: IpcServices): HandlerRegistry {
     ...discountsHandlers(services.discounts),
     ...kotHandlers(services.kot),
     ...tablesHandlers(services.tables),
+    ...stockHandlers(services.inventory, services.subRecipes),
+    ...recipesHandlers(services.recipes),
+    ...expensesHandlers(services.expenses),
   };
 }
 
