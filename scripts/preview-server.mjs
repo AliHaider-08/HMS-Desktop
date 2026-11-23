@@ -62,6 +62,7 @@ const repos = {
   recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
   expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
   stockOps: load('db/repositories/stockOpsRepository.js').createStockOpsRepository(db),
+  recurringBills: load('db/repositories/recurringBillsRepository.js').createRecurringBillsRepository(db),
 };
 
 // Printing needs a real window. The preview throws so the UI reports it honestly,
@@ -112,6 +113,7 @@ const reportsService = load('services/reportsService.js').createReportsService({
   inventory: repos.inventory,
   stockOps: repos.stockOps,
   missingRecipes: () => repos.catalog.countPricedItemsWithoutRecipe(),
+  recurring: repos.recurringBills,
 });
 
 const registry = buildRegistry({
@@ -181,6 +183,7 @@ const registry = buildRegistry({
   expenses: load('services/expensesService.js').createExpensesService({
     expenses: repos.expenses,
     shifts: repos.shifts,
+    recurring: repos.recurringBills,
   }),
   recipes: load('services/recipeService.js').createRecipeService({
     recipes: repos.recipes,

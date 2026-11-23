@@ -18,6 +18,7 @@ const HEADERS: Record<ExportReportName, string[]> = {
   item_profit: ['Item', 'Qty sold', 'Revenue', 'Cost', 'Profit', 'Margin %', 'Unpriced revenue'],
   stock_value: ['Ingredient', 'Category', 'On hand', 'Unit', 'Average cost', 'Value', 'Low stock'],
   purchases: ['Date', 'Purchase', 'Supplier', 'Bill', 'Total', 'Paid', 'Outstanding', 'Status'],
+  purchases_by_ingredient: ['Ingredient', 'Bills', 'Quantity', 'Unit', 'Spend', 'Price change %'],
   wastage: ['Ingredient', 'Reason', 'Times', 'Quantity', 'Value'],
   expenses: ['Category', 'Entries', 'Total'],
 };
@@ -132,6 +133,9 @@ export function createCsvService(deps: {
             ['Cost of food sold', formatAmount(pnl.cogs)],
             ['Gross profit', formatAmount(pnl.grossProfit)],
             ['Shop expenses', formatAmount(pnl.shopExpenses)],
+            ['Salaries paid', formatAmount(pnl.salaries)],
+            ['Vehicle fuel and repairs', formatAmount(pnl.vehicleCosts)],
+            ['Total running costs', formatAmount(pnl.operatingExpenses)],
             ['Net profit', formatAmount(pnl.netProfit)],
             ['Tax collected (not income)', formatAmount(pnl.tax)],
             ['Bills', pnl.orderCount],
@@ -184,6 +188,19 @@ export function createCsvService(deps: {
             ]),
           );
 
+        case 'purchases_by_ingredient':
+          return toCsv(
+            HEADERS.purchases_by_ingredient,
+            reports.purchaseReport(range).byIngredient.map((row) => [
+              row.name,
+              row.purchaseCount,
+              row.qtyBase,
+              row.baseUnit,
+              formatAmount(row.spend),
+              row.changeX100 === null ? '' : (row.changeX100 / 100).toFixed(1),
+            ]),
+          );
+
         case 'wastage':
           return toCsv(
             HEADERS.wastage,
@@ -196,15 +213,23 @@ export function createCsvService(deps: {
             ]),
           );
 
-        case 'expenses':
-          return toCsv(
-            HEADERS.expenses,
-            reports.expenseReport(range).byCategory.map((row) => [
+        case 'expenses': {
+          const report = reports.expenseReport(range);
+          // The typed expenses first, then the other ledgers — labelled so nobody
+          // adds the two halves together by accident in Excel.
+          return toCsv(HEADERS.expenses, [
+            ...report.byCategory.map((row) => [
               row.categoryName,
               row.count,
               formatAmount(row.total),
             ]),
-          );
+            ...report.otherCosts.map((line) => [
+              `${line.label} (${line.source}, not in the total)`,
+              line.count,
+              formatAmount(line.total),
+            ]),
+          ]);
+        }
 
         default:
           return toCsv(HEADERS.daily_sales, []);

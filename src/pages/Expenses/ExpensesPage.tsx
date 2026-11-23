@@ -22,6 +22,7 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Alert } from '../../components/Alert';
 import { toast } from '../../components/Toast';
 import { ExpenseModal } from './ExpenseModal';
+import { RecurringBillsPanel } from './RecurringBillsPanel';
 
 /**
  * Expenses page (Roadmap 4.E).
@@ -40,7 +41,7 @@ export function ExpensesPage() {
   const canWrite = allow('expenses:write');
   const canVoid = allow('expenses:void');
 
-  const [tab, setTab] = useState<'list' | 'categories'>('list');
+  const [tab, setTab] = useState<'list' | 'categories' | 'recurring'>('list');
   const [month, setMonth] = useState(currentMonth());
   const [showVoided, setShowVoided] = useState(false);
   const [search, setSearch] = useState('');
@@ -290,6 +291,7 @@ export function ExpensesPage() {
             [
               { value: 'list', label: 'Expenses' },
               { value: 'categories', label: 'Categories' },
+              { value: 'recurring', label: 'Monthly bills' },
             ] as const
           ).map((option) => (
             <button
@@ -307,7 +309,7 @@ export function ExpensesPage() {
           ))}
         </div>
 
-        {tab === 'list' && (
+        {tab !== 'recurring' && tab === 'list' && (
           <>
             <input
               type="month"
@@ -355,7 +357,9 @@ export function ExpensesPage() {
         )}
       </div>
 
-      {tab === 'list' ? (
+      {tab === 'recurring' ? (
+        <RecurringBillsPanel categories={categories} onChanged={overview.reload} />
+      ) : tab === 'list' ? (
         <>
           {overview.data && overview.data.total > 0 && (
             <p className="mb-3 text-caption text-text-secondary">

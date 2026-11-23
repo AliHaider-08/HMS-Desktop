@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { cn } from '../utils/cn';
 
-type BadgeTone = 'neutral' | 'success' | 'pending' | 'info' | 'danger' | 'accent';
+export type BadgeTone = 'neutral' | 'success' | 'pending' | 'info' | 'danger' | 'accent';
 
 interface BadgeProps {
   children: ReactNode;

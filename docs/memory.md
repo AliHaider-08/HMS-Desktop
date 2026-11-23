@@ -7,10 +7,11 @@
 Fast Food Management Desktop App (Electron + React + SQLite)
 
 ## Current Status
-- Current phase: **Roadmap Phase 4 complete — 4.A → 4.G all done (376 checks / 22 suites).**
+- Current phase: **Roadmap Phase 4 complete — 4.A → 4.H all done (400 checks / 24 suites).**
 - Original six phases and the roadmap hardening are complete and merged.
-- File currently being worked on: `docs/memory.md` (last code files: `src/pages/Reports/ProfitPanels.tsx`,
-  `src/pages/Reports/SpendPanels.tsx`, `scripts/test-phase22.mjs`)
+- File currently being worked on: `docs/memory.md` (last code files:
+  `src/pages/Expenses/RecurringBillsPanel.tsx`, `src/pages/Stock/SupplierReturnModal.tsx`,
+  `electron/db/repositories/recurringBillsRepository.ts`, `scripts/test-phase24.mjs`)
 - App runs offline; data file: `%APPDATA%\gul-khan-fast-food\data\fastfood.db`
 - Logs: `%APPDATA%\gul-khan-fast-food\logs\app.log`
 - Backups: `%APPDATA%\gul-khan-fast-food\backups\` (auto on close, keeps last 7)
@@ -62,7 +63,7 @@ PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all
 
 ## Verification (headless)
 `npm run verify` runs typecheck + lint + all phase tests.
-Last result: **376 checks passed, 0 failed across 22 suites** (`npm run test:all`), stable across
+Last result: **400 checks passed, 0 failed across 24 suites** (`npm run test:all`), stable across
 repeated runs.
 
 | Suite | Checks |
@@ -75,6 +76,8 @@ repeated runs.
 | Phase 6 (`scripts/test-phase6.mjs`) | 13 |
 | Phase 7 (`scripts/test-phase7.mjs`) | 17 |
 | Phase 8–22 (roadmap, hardening, Phase 4) | 240 |
+| Phase 23 (`scripts/test-phase23.mjs`) — salaries + vehicle costs in the P&L | 8 |
+| Phase 24 (`scripts/test-phase24.mjs`) — opening stock, supplier returns, price trend, recurring bills | 16 |
 
 ## Decisions Made
 - Electron 45, React 19, Vite 7, TypeScript 5.9, Tailwind 3, Zustand 5, React Router 7 (hash
@@ -269,9 +272,30 @@ The five things that were fine in a demo and wrong in a shop. Each has a test in
   **Load older orders** button and discards accumulated pages when a filter changes (in the filter
   setter, not an effect — the React compiler rejects `setState` inside `useEffect`).
 
-## Phase 4 — Inventory, recipes and expenses (migrations 015–021)
+## Phase 4 — Inventory, recipes and expenses (migrations 015–022)
 
-The client's six requirements, in the app. 376 checks across 22 suites, `npm run verify` green.
+The client's six requirements, in the app. 400 checks across 24 suites, `npm run verify` green.
+
+### 4.H — follow-up round (migrations 022)
+
+Built after an audit of the plan against the finished app. `test-phase23.mjs` (8 checks) covers
+salaries + vehicle costs as first-class P&L lines; `test-phase24.mjs` (16 checks) covers opening
+stock, supplier returns, purchases-by-ingredient with the price trend, and recurring bills
+(`022_recurring_bills.sql`).
+
+Three rules worth remembering, because they are easy to "simplify" back into bugs:
+
+- `operatingExpenses = shopExpenses + salaries + vehicleCosts`, but **wastage is never added** —
+  it is already inside `cogs` at the moment it spoiled. It is reported, not summed.
+- A recurring bill's reminder is **read-only**. The dashboard says "rent is due in two days";
+  the expense is booked only when the owner confirms the amount, and it is dated the *due date*
+  of that month, not the day of confirmation.
+- A supplier return is **not a void**. The bill stays posted; only the returned quantity leaves
+  the shelf, valued at the current average so the shelf is never repriced.
+
+**Still deferred: sub-recipes.** Waiting on §15 question 4 (does the kitchen make its own sauces
+or marinate chicken in-house?). An ingredient made from ingredients needs a self-reference in
+`recipe_items`; guessing before that answer would shape the schema on a hunch.
 
 ### What exists now
 
@@ -389,7 +413,7 @@ The client's six requirements, in the app. 376 checks across 22 suites, `npm run
 ## Last Updated
 - Date: 2026-11-22
 - By: Arena Agent (Phase 4 — 4.A to 4.G). All six client requirements delivered, plus wastage /
-  adjustments / stock counts and the full reporting set; 376 checks across 22 suites;
+  adjustments / stock counts and the full reporting set; 400 checks across 24 suites;
   `npm run verify` green. Phase 4 is complete.
 - Open next: the eight client questions in `docs/inventory-expenses-plan.md` §15 (portions,
   who sees profit, supplier credit, in-house sauces, opening stock, recurring bills) and the

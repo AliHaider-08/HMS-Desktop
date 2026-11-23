@@ -1,13 +1,17 @@
-import { CHANNELS } from '../../src/types/api';
+import { z } from 'zod';
+import { CHANNELS, type RecurringBillInput } from '../../src/types/api';
 import {
   expenseCategorySchema,
   expenseIdSchema,
   expenseListSchema,
   expenseSchema,
   expenseVoidSchema,
+  recurringBillSchema,
+  recurringBillSettleSchema,
+  recurringBillsQuerySchema,
 } from '../../src/types/schemas';
 import type { ExpensesService } from '../services/expensesService';
-import type { HandlerRegistry } from './registry';
+import type { HandlerContext, HandlerRegistry } from './registry';
 
 /**
  * Shop expenses (Roadmap 4.F).
@@ -44,6 +48,47 @@ export function expensesHandlers(expenses: ExpensesService): HandlerRegistry {
       schema: expenseCategorySchema,
       handler: (input: Parameters<ExpensesService['saveCategory']>[0]) =>
         expenses.saveCategory(input),
+    },
+
+    /* ---------------------- recurring bills (4.E2) ---------------------- */
+
+    [CHANNELS.recurringBills]: {
+      capability: 'expenses:read',
+      schema: recurringBillsQuerySchema,
+      handler: (input: { period?: string }) => expenses.recurringBills(input.period),
+    },
+
+    [CHANNELS.recurringBillSave]: {
+      capability: 'expenses:write',
+      schema: recurringBillSchema,
+      handler: (input: RecurringBillInput) => expenses.saveRecurringBill(input),
+    },
+
+    [CHANNELS.recurringBillDelete]: {
+      capability: 'expenses:write',
+      schema: z.object({ id: z.number().int().positive() }),
+      handler: (input: { id: number }) => expenses.deleteRecurringBill(input.id),
+    },
+
+    [CHANNELS.recurringBillSettle]: {
+      capability: 'expenses:write',
+      schema: recurringBillSettleSchema,
+      handler: (input: Parameters<ExpensesService['settleRecurringBill']>[0], context: HandlerContext) =>
+        expenses.settleRecurringBill(input, context.user.id),
+    },
+
+    [CHANNELS.recurringBillUnsettle]: {
+      // Undoing a settlement voids the expense it created, so it needs the void
+      // capability as well as write — it changes money that was already booked.
+      capability: 'expenses:void',
+      schema: z.object({
+        templateId: z.number().int().positive(),
+        period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+      }),
+      handler: (
+        input: { templateId: number; period: string },
+        context: HandlerContext,
+      ) => expenses.unsettleRecurringBill(input, context.user.id),
     },
 
     [CHANNELS.expenseCategoryDelete]: {

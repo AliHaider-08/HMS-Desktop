@@ -4,7 +4,7 @@ import { Card, CardHeading } from '../../components/Card';
 import { Alert } from '../../components/Alert';
 import { Badge } from '../../components/Badge';
 import { formatAmount, formatDate } from '../../utils/format';
-import { formatQuantity } from '../../utils/units';
+import { formatQuantity, formatUnitCost } from '../../utils/units';
 
 /**
  * Purchases (Roadmap 4.G).
@@ -80,6 +80,61 @@ export function PurchasesPanel({
     },
   ];
 
+  const ingredientColumns: Array<Column<PurchaseReport['byIngredient'][number]>> = [
+    {
+      key: 'name',
+      header: 'Ingredient',
+      render: (row) => (
+        <div>
+          <p className="font-medium">{row.name}</p>
+          <p className="text-caption text-text-secondary">
+            {row.purchaseCount} bill{row.purchaseCount === 1 ? '' : 's'}
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: 'qty',
+      header: 'Bought',
+      align: 'right',
+      render: (row) => <span className="tabular">{formatQuantity(row.qtyBase, row.baseUnit)}</span>,
+    },
+    {
+      key: 'spend',
+      header: 'Spent',
+      align: 'right',
+      render: (row) => <span className="font-semibold tabular">{formatAmount(row.spend)}</span>,
+    },
+    {
+      key: 'price',
+      header: 'Last price',
+      align: 'right',
+      render: (row) =>
+        row.lastCostMilli === null ? (
+          <span className="text-text-secondary">—</span>
+        ) : (
+          <span className="tabular text-text-secondary">
+            {formatUnitCost(row.lastCostMilli, row.baseUnit)}
+          </span>
+        ),
+    },
+    {
+      key: 'change',
+      header: 'Change',
+      align: 'right',
+      render: (row) => {
+        if (row.changeX100 === null) return <span className="text-text-secondary">—</span>;
+        if (row.changeX100 === 0) return <Badge tone="success">Unchanged</Badge>;
+        return (
+          <Badge tone={row.changeX100 > 0 ? 'danger' : 'success'}>
+            {row.changeX100 > 0 ? '+' : ''}
+            {(row.changeX100 / 100).toFixed(1)}%
+          </Badge>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-4">
       {error && <Alert tone="error">{error}</Alert>}
@@ -120,6 +175,29 @@ export function PurchasesPanel({
                 </span>
               </div>
             ))}
+          </div>
+        </Card>
+      )}
+
+      {/*
+        The same money seen from the other side. The bill list answers "what did I
+        pay?"; this answers "what has been getting dearer?" — which is the question
+        that protects the margin, because a rise here silently eats every recipe
+        that uses the ingredient.
+      */}
+      {(report?.byIngredient.length ?? 0) > 0 && (
+        <Card>
+          <CardHeading
+            title="By ingredient, with price trend"
+            subtitle="First and last price paid in this period — a rise here eats every recipe that uses it"
+          />
+          <div className="mt-3">
+            <Table
+              columns={ingredientColumns}
+              rows={report?.byIngredient ?? []}
+              rowKey={(row) => row.ingredientId}
+              emptyMessage="No ingredient purchases in this period"
+            />
           </div>
         </Card>
       )}
@@ -311,6 +389,43 @@ export function ExpensesPanel({
           hint={report?.voidedValue ? `${currency} ${formatAmount(report.voidedValue)}` : undefined}
         />
       </div>
+
+      {/*
+        The other cost ledgers, shown on this screen but never folded into the total
+        above. The plan asks for them here so the owner sees one hisab; keeping them
+        separate is what stops the same rupee being counted twice.
+      */}
+      {(report?.otherCosts.some((line) => line.total > 0) ?? false) && (
+        <Card>
+          <CardHeading
+            title="Also paid this period"
+            subtitle="Recorded elsewhere — listed here, not part of the expenses total above"
+          />
+          <div className="mt-2 flex flex-col gap-1">
+            {report?.otherCosts.map((line) => (
+              <div
+                key={line.key}
+                className="flex items-baseline justify-between gap-4 border-b border-border/60 py-1 last:border-0"
+              >
+                <span className="text-body">
+                  {line.label}
+                  <span className="ml-2 text-caption text-text-secondary">
+                    {line.source}
+                    {line.count > 0 ? ` · ${line.count}` : ''}
+                  </span>
+                </span>
+                <span
+                  className={`font-semibold tabular ${
+                    line.total > 0 ? 'text-text-primary' : 'text-text-secondary'
+                  }`}
+                >
+                  {currency} {formatAmount(line.total)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {(report?.byPaidFrom.length ?? 0) > 0 && (
         <Card>

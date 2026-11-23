@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
+  BellRing,
   Bike,
   ClipboardList,
   Package,
@@ -92,6 +93,7 @@ export function DashboardPage() {
   const { can, allow, user } = useAuth();
   // Cost, profit, stock value and shop expenses are the owner's numbers (4.G).
   const canSeeCosts = allow('costs:read');
+  const canSeeExpenses = allow('expenses:read');
   const currency = useSettings((settings) => settings.currency);
 
   const { data, isLoading, error, reload } = useAsync(
@@ -195,6 +197,48 @@ export function DashboardPage() {
           tone="info"
         />
       </div>
+
+      {/*
+       * Monthly bills that are due or late (4.E2).
+       *
+       * A nudge, not a booking: this banner never creates an expense — it says what
+       * is coming and links to the screen where the owner confirms the amount. Rent
+       * is the one cost that is easy to forget for a week and impossible to explain
+       * afterwards, which is exactly why it belongs on the first screen he opens.
+       */}
+      {canSeeExpenses && (data?.billsDue.length ?? 0) > 0 && (
+        <Card className="mb-6 border-warning/40 bg-warning/5">
+          <div className="flex flex-wrap items-start gap-3">
+            <BellRing aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-text-primary">
+                {data!.billsDue.length} monthly bill
+                {data!.billsDue.length === 1 ? '' : 's'} to settle
+              </p>
+              <p className="text-body text-text-secondary">
+                {data!.billsDue
+                  .map(
+                    (bill) =>
+                      `${bill.name} — ${
+                        bill.overdue
+                          ? `${Math.abs(bill.daysUntilDue)} day${Math.abs(bill.daysUntilDue) === 1 ? '' : 's'} late`
+                          : bill.daysUntilDue === 0
+                            ? 'due today'
+                            : `due in ${bill.daysUntilDue} day${bill.daysUntilDue === 1 ? '' : 's'}`
+                      }`,
+                  )
+                  .join(' · ')}
+              </p>
+            </div>
+            <Link
+              to="/expenses"
+              className="text-button font-medium text-primary hover:underline"
+            >
+              {allow('expenses:write') ? 'Record the payment' : 'View expenses'}
+            </Link>
+          </div>
+        </Card>
+      )}
 
       {/*
        * Roadmap 4.G cards. They only appear for a role that may see costs

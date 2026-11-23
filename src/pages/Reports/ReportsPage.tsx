@@ -303,8 +303,8 @@ export function ReportsPage() {
                   value={formatAmount(profit.data.grossProfit)}
                 />
                 <SummaryTile
-                  label="Shop expenses"
-                  value={formatAmount(profit.data.shopExpenses)}
+                  label="Running costs"
+                  value={formatAmount(profit.data.operatingExpenses)}
                 />
               </div>
 
@@ -346,10 +346,27 @@ export function ReportsPage() {
                     negative
                   />
                   <PnlRow label="Gross profit" value={profit.data.grossProfit} strong />
+
+                  {/*
+                    Four cost lines, one per source table. Showing them separately is
+                    the point: an owner who sees "salaries 0" knows the payouts were
+                    never recorded, which one lumpy "expenses" total would hide.
+                  */}
                   <PnlRow
-                    label="Shop expenses"
+                    label="Shop expenses (rent, bills, repairs)"
                     value={profit.data.shopExpenses}
                     negative
+                  />
+                  <PnlRow label="Salaries paid" value={profit.data.salaries} negative />
+                  <PnlRow
+                    label="Vehicle fuel and repairs"
+                    value={profit.data.vehicleCosts}
+                    negative
+                  />
+                  <PnlRow
+                    label="Total running costs"
+                    value={profit.data.operatingExpenses}
+                    strong
                   />
                   <PnlRow label="Net profit" value={profit.data.netProfit} strong highlight />
                 </dl>
@@ -363,6 +380,8 @@ export function ReportsPage() {
                     : ''}
                   . Wastage of {formatAmount(profit.data.wastageValue)} is already inside
                   the cost of food, because those ingredients were bought and never sold.
+                  {profit.data.salaries === 0 &&
+                    ' No salary payouts fell in this period — if wages were paid, record them on the Salaries page or this profit will look too high.'}
                 </p>
               </Card>
 

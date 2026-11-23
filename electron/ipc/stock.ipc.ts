@@ -9,6 +9,7 @@ import {
   purchaseSchema,
   stockCountSchema,
   stockReportRangeSchema,
+  supplierReturnSchema,
   supplierSchema,
   voidPurchaseSchema,
   wastageSchema,
@@ -154,6 +155,17 @@ export function stockHandlers(inventory: InventoryService): HandlerRegistry {
       schema: wastageSchema,
       handler: (input: Parameters<InventoryService['recordWastage']>[0], context: HandlerContext) =>
         inventory.recordWastage(input, context.user.id),
+    },
+
+    [CHANNELS.stockSupplierReturn]: {
+      // Sending a delivery back is a claim against the supplier, so it sits with the
+      // same people who may write stock off — never a cashier.
+      capability: 'stock:adjust',
+      schema: supplierReturnSchema,
+      handler: (
+        input: Parameters<InventoryService['supplierReturn']>[0],
+        context: HandlerContext,
+      ) => inventory.supplierReturn(input, context.user.id),
     },
 
     [CHANNELS.stockAdjust]: {

@@ -37,6 +37,7 @@ import { createInventoryService } from './services/inventoryService';
 import { createRecipeRepository } from './db/repositories/recipeRepository';
 import { createExpensesRepository } from './db/repositories/expensesRepository';
 import { createStockOpsRepository } from './db/repositories/stockOpsRepository';
+import { createRecurringBillsRepository } from './db/repositories/recurringBillsRepository';
 import { createRecipeService } from './services/recipeService';
 import { createStockDeductionService } from './services/stockDeductionService';
 import { createExpensesService } from './services/expensesService';
@@ -118,6 +119,7 @@ async function bootstrapServices(): Promise<void> {
   const ordersRepo = createOrdersRepository(db);
   const staffRepo = createStaffRepository(db);
   const vehiclesRepo = createVehiclesRepository(db);
+  const recurringBillsRepo = createRecurringBillsRepository(db);
   const sequences = createSequenceRepository(db);
   const paymentsRepo = createPaymentsRepository(db);
   const shiftsRepo = createShiftsRepository(db);
@@ -294,7 +296,11 @@ async function bootstrapServices(): Promise<void> {
       shifts: shiftsRepo,
       stockOps: stockOpsRepo,
     }),
-    expenses: createExpensesService({ expenses: expensesRepo, shifts: shiftsRepo }),
+    expenses: createExpensesService({
+      expenses: expensesRepo,
+      shifts: shiftsRepo,
+      recurring: recurringBillsRepo,
+    }),
     recipes: createRecipeService({
       recipes: recipeRepo,
       catalog: catalogRepo,

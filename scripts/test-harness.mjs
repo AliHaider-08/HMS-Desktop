@@ -65,6 +65,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     inventory: load('db/repositories/inventoryRepository.js').createInventoryRepository(db),
     recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
     expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
+    recurringBills: load('db/repositories/recurringBillsRepository.js').createRecurringBillsRepository(db),
     stockOps: load('db/repositories/stockOpsRepository.js').createStockOpsRepository(db),
   };
 
@@ -115,6 +116,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     inventory: repositories.inventory,
     stockOps: repositories.stockOps,
     missingRecipes: () => repositories.catalog.countPricedItemsWithoutRecipe(),
+    recurring: repositories.recurringBills,
   });
 
   const csvService = createCsvService({
@@ -216,6 +218,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     expenses: load('services/expensesService.js').createExpensesService({
       expenses: repositories.expenses,
       shifts: repositories.shifts,
+      recurring: repositories.recurringBills,
     }),
   });
 

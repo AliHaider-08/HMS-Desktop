@@ -257,15 +257,21 @@ Each sub-phase has its own migration, test script, `npm run verify` gate and a `
 | **4.E** | Shop expenses | Categories, entry, drawer link, void with audit, recurring bills (4.E2), drawings (4.E2) | `020_expenses.sql` | `test-phase19.mjs` | **done** |
 | **4.F** | Wastage, adjustments, stock count | Wastage entry (reason codes + notes + dated at average cost), stock count with frozen variance (the shelf is SET to the counted qty), adjustment ledger, supplier return via the existing `supplier_return` kind, wastage report by ingredient+reason, Wastage + Stock counts tabs | `021_stock_ops.sql` | `test-phase21.mjs` | **done** (15 checks) |
 | **4.G** | Profit and reports | P&L (`reports:profit`), item profitability, stock valuation, purchases / wastage / expenses report tabs, four dashboard cards, CSV export for all six | none | `test-phase20.mjs` + `test-phase22.mjs` | **done** |
+| **4.H** | Follow-up round | Salaries + vehicle costs as P&L lines, opening-stock screen, purchases by ingredient with price trend, supplier return action, recurring bills (4.E2) | `022_recurring_bills.sql` | `test-phase23.mjs` + `test-phase24.mjs` | **done** (24 checks) |
 
-**Status: Phase 4 is complete.** All six client requirements are delivered (1 stock entry 4.A,
-2 recipes 4.C, 3 automatic deduction 4.D, 4 purchase prices + history 4.B, 5 cost vs price vs
-profit 4.C + 4.G, 6 shop expenses 4.E) and the two extras the plan added along the way — wastage,
-adjustments and stock counts (4.F), and the full reporting set (4.G) — are finished as well.
-Next: `docs/inventory-expenses-plan.md` §15 lists the eight questions still open for the client;
-nothing in the build is blocked on them.
+**Status: Phase 4 is complete, including the 4.H follow-up round.** All six client requirements
+are delivered (1 stock entry 4.A, 2 recipes 4.C, 3 automatic deduction 4.D, 4 purchase prices +
+history 4.B, 5 cost vs price vs profit 4.C + 4.G, 6 shop expenses 4.E) and every extra the plan
+added along the way — wastage, adjustments and stock counts (4.F), the full reporting set (4.G),
+and the follow-up round 4.H — are finished as well.
 
-Migration numbering (authoritative): 015 inventory, 016 purchases, 017 cash↔purchase link, 018 recipes, 019 deduction, **020 expenses**, **021 stock ops**.
+The one item still deferred is **sub-recipes** (house-made sauces and marinades), which is waiting
+on **§15 question 4**: if the kitchen makes its own mayo or marinates chicken in-house, those are
+ingredients made from ingredients and the recipe table needs a self-reference. Building it before
+the answer would be guessing at the client's kitchen. `docs/inventory-expenses-plan.md` §15 lists
+the eight questions still open; nothing in the build is blocked on them except sub-recipes.
+
+Migration numbering (authoritative): 015 inventory, 016 purchases, 017 cash↔purchase link, 018 recipes, 019 deduction, 020 expenses, 021 stock ops, **022 recurring bills**.
 
 Scope note: 4.E (expenses) is built before 4.F (wastage/count) because expenses is the client's sixth requirement and wastage was not asked for; the P&L in 4.G needs both, so the order only changes the schedule, not the result.
 
@@ -294,6 +300,71 @@ Five report channels, all behind `costs:read` (the owner's private numbers, neve
   expense leaves the total but stays visible in `voidedCount`.
 - **Dashboard cards** (only for `costs:read`): today's gross profit, stock on the shelf, money
   spent today, items with no recipe, plus ingredient price rises over 30 days.
+
+### 4.H contract, as built (follow-up round)
+
+Four gaps found by re-reading the plan against the finished app, plus the deferred 4.E2.
+
+**Salaries and vehicle costs are now P&L lines of their own.** Before this, `operatingExpenses`
+counted only the rows typed on the Expenses page, so paying wages left the profit reading high:
+the money had left the drawer but the report said it had not. The contract is now
+
+```
+operatingExpenses = shopExpenses + salaries + vehicleCosts
+netProfit         = grossProfit − operatingExpenses
+```
+
+Three properties are deliberate and pinned by `test-phase23.mjs`:
+
+- `shopExpenses` still means *the rows on the Expenses page*, unchanged, so the report total and
+  the Expenses page total can never disagree.
+- `salaries` filters on `paid_on`, not on the month the wage is *for* — a salary paid on 3
+  December for November is December's cost, because that is when the cash left.
+- **wastage is never added here.** Spoiled stock is already in `cogs` at the moment it spoils;
+  adding `wastageValue` as a second operating cost would double-count it. The number is
+  reported on its own so the owner can see it without it moving the profit.
+
+The Expenses *report* tab lists salaries, vehicles and wastage as read-only `otherCosts` lines
+with a `source` and a count, never summed into its own `total` — the same numbers, one owner.
+
+**Opening stock (4.B, the go-live screen).** `stock:opening` takes a quantity *and* a cost per
+base unit, writes an `opening` movement and sets the weighted average. It deliberately creates
+**no purchase row and no supplier balance** — the food was bought before the shop had a ledger,
+and inventing a bill would invent a debt. A line with no cost is refused by the UI (a free
+ingredient makes every recipe look profitable); a quantity of zero is skipped, and a negative
+quantity is refused outright, because opening stock can only ever add.
+
+**Purchases by ingredient with a price trend.** `reports:purchases` gained `byIngredient`:
+per ingredient, the bill count, quantity, spend, cheapest and dearest price, and
+`changeX100 = (last − first) × 10 000 / first` — *"chicken has gone up 12%"* is the number that
+makes a menu repricing decision obvious. Only posted bills count; a voided delivery is not a
+price. Exported as `purchases_by_ingredient`.
+
+**Supplier return.** `stock:supplier-return` (capability `stock:adjust`) sends stock back. It is
+not "void the purchase": of twenty crates delivered, two may be crushed while the other
+eighteen are perfectly good and already being sold — voiding would take all twenty off the
+shelf and wipe a bill the shop still owes. A return takes the two back, values them at the
+current average (so the shelf is never repriced), names the supplier in the reason, and leaves
+the bill `posted` for the owner to claim a credit against. It refuses when the quantity exceeds
+what is on the shelf, and refuses a reason shorter than three characters — the paper trail is
+the whole point.
+
+**Recurring bills (4.E2).** `expenses:recurring` and friends.
+
+- A template (`recurring_bills`) holds what the bill is, the category, the due day, how many
+  days ahead to warn, and a *typical* amount used only to pre-fill the form.
+- A payment (`recurring_bill_payments`) holds one month: `paid` or `skipped`, with a
+  `UNIQUE (template_id, period)` — a month cannot be paid twice.
+- **Reading never books anything.** The dashboard banner and the Expenses tab are read-only; the
+  expense is created only when the owner confirms what he actually paid, and it goes through
+  the normal `save()` path so the drawer link, the void rule and the P&L behave exactly as if he
+  had typed it by hand.
+- The expense is dated the **due date of that month**, not the day he confirmed it, so rent
+  confirmed late still lands in the month it belongs to.
+- `dueDay` is capped at the month's real length: the 31st means 28 February, 29 in a leap year.
+  A string-concatenated `2027-02-31` would be a date no report could ever match.
+- Un-settling **voids** the expense rather than deleting it, and a deactivated template stops
+  nagging while keeping all its history.
 
 ### 4.F contract, as built
 
@@ -384,9 +455,9 @@ Cost and profit are the owner's private numbers and are hidden from everyone els
 2. **Who sees profit?** Recommended: owner only. Managers can be allowed later.
 3. **Do you buy on credit (udhaar) from suppliers?** In v1 the app shows "owed to supplier" from credit purchases; a full supplier-payment ledger can be added after.
 4. **Do you make your own sauces / marinate chicken in-house?** If yes, sub-recipes are needed (planned as a later step).
-5. **Opening stock:** on go-live day, what is on the shelf and at what cost? (An "opening stock" screen will take it.)
-6. **Recurring bills:** which monthly bills should the app remind you about (rent, internet, gas)?
-7. **Stock count frequency:** daily, weekly or monthly?
+5. **Opening stock:** on go-live day, what is on the shelf and at what cost? — **screen built (4.B/4.H):** Stock → *Opening stock*. The question is now for the client to *fill in* on go-live day, not for us to build.
+6. **Recurring bills:** which monthly bills should the app remind you about (rent, internet, gas)? — **screen built (4.E2/4.H):** Expenses → *Monthly bills*. The client answers by adding the bills himself; any bill can be added or paused.
+7. **Stock count frequency:** daily, weekly or monthly? — **not a build question:** Stock counts can be taken as often as wanted (4.F); the frequency is a shop routine, not a setting.
 8. **Old orders** have no cost data. Profit is shown **from go-live onward**; older bills show "no cost data". Acceptable?
 
 ---

@@ -23,8 +23,10 @@ import type { VehiclesRepository } from '../db/repositories/vehiclesRepository';
 import type { ExpensesRepository } from '../db/repositories/expensesRepository';
 import type { InventoryRepository } from '../db/repositories/inventoryRepository';
 import type { StockOpsRepository } from '../db/repositories/stockOpsRepository';
+import type { RecurringBillsRepository } from '../db/repositories/recurringBillsRepository';
 import type { StaffService } from './staffService';
 import { daysUntil, monthEnd, monthStart, toSqlDate, todaySqlDate } from '../utils/datetime';
+import { daysBetween, dueDateFor } from './expensesService';
 
 /** Last `count` days ending today, filling gaps with zero rows. */
 export function lastNDays(count: number): { fromDate: string; toDate: string; days: string[] } {
@@ -58,8 +60,11 @@ export function createReportsService(deps: {
   stockOps?: StockOpsRepository;
   /** Active menu items without a recipe — the dashboard's "profit unknown" card. */
   missingRecipes?: () => number;
+  /** Recurring bills (4.E2) — the dashboard's "rent is due" nudge. */
+  recurring?: RecurringBillsRepository;
 }) {
   const { orders, catalog, staff, vehicles, staffService, expenses, inventory, stockOps } = deps;
+  const recurring = deps.recurring;
 
   /** `stockValue` is a cache-backed number; round the same way the shelf does. */
   const valueOf = (qtyOnHand: number, avgCostMilli: number): number =>
@@ -144,7 +149,54 @@ export function createReportsService(deps: {
           }
         : null;
 
-      const todayExpenses = expenses?.summary(today, today).total ?? 0;
+      /*
+       * "Spent today" means every operating cost of the day, not just the rows typed
+       * on the Expenses page — otherwise paying a day's wages would leave the card
+       * reading zero.
+       */
+      const todayExpenses =
+        (expenses?.summary(today, today).total ?? 0) +
+        staff.salaryPaidBetween(today, today).total +
+        vehicles.expensesBetween(today, today).total;
+
+      /*
+       * Bills that need the owner's attention this month.
+       *
+       * Read-only on purpose: opening the dashboard must never book money. It only
+       * says "the rent is due in two days" — the expense is created when he confirms
+       * the amount on the Expenses page.
+       */
+      const billsDue = (() => {
+        if (!recurring?.isReady) return [];
+
+        const period = today.slice(0, 7);
+        return recurring
+          .list()
+          .filter((bill) => bill.active)
+          .map((bill) => {
+            const payment = recurring.findPayment(bill.id, period);
+            const dueDate = dueDateFor(bill.dueDay, period);
+            const daysUntilDue = daysBetween(today, dueDate);
+            const state = payment
+              ? payment.status
+              : daysUntilDue < 0
+                ? 'overdue'
+                : daysUntilDue <= bill.remindDays
+                  ? 'due'
+                  : 'upcoming';
+
+            return { bill, period, dueDate, daysUntilDue, state, payment };
+          })
+          .filter((row) => row.state === 'due' || row.state === 'overdue')
+          .map((row) => ({
+            id: row.bill.id,
+            name: row.bill.name,
+            dueDate: row.dueDate,
+            daysUntilDue: row.daysUntilDue,
+            typicalAmount: row.bill.typicalAmount,
+            overdue: row.state === 'overdue',
+          }));
+      })();
 
       const priceChecks = (inventory?.priceRises(toSqlDate(new Date(Date.now() - 30 * 86_400_000))) ?? [])
         .map((row) => ({
@@ -170,6 +222,7 @@ export function createReportsService(deps: {
         todayExpenses,
         missingRecipes: deps.missingRecipes?.() ?? 0,
         priceChecks,
+        billsDue,
       };
     },
 
@@ -193,9 +246,19 @@ export function createReportsService(deps: {
       const sales = orders.profitAndLoss(range.fromDate, range.toDate);
       const shop = expenses?.summary(range.fromDate, range.toDate) ?? { rows: [], total: 0 };
 
+      /*
+       * Wages and the van are real costs the shop pays, and until now the P&L did not
+       * see them: it showed a profit the owner never had, by exactly what he handed
+       * out on salary day and what he put in the tank. They come from their own
+       * tables, never from the Expenses page, so nothing is counted twice.
+       */
+      const salary = staff.salaryPaidBetween(range.fromDate, range.toDate);
+      const fleet = vehicles.expensesBetween(range.fromDate, range.toDate);
+
       // The pair that actually belongs together: the sales we could price, and
       // what those sales cost.
       const grossProfit = sales.knownNetSales - sales.cogs;
+      const operatingExpenses = shop.total + salary.total + fleet.total;
 
       return {
         from: range.fromDate,
@@ -213,12 +276,22 @@ export function createReportsService(deps: {
         linesWithoutCost: sales.linesWithoutCost,
         grossProfit,
         shopExpenses: shop.total,
+        salaries: salary.total,
+        vehicleCosts: fleet.total,
+        operatingExpenses,
         wastageValue: sales.wastageValue,
         wastageQty: sales.wastageQty,
-        netProfit: grossProfit - shop.total,
+        netProfit: grossProfit - operatingExpenses,
         cancelledCount: sales.cancelled,
         cancelledValue: sales.cancelledValue,
         expensesByCategory: shop.rows,
+        salariesByPerson: salary.byPerson.map((row) => ({
+          name: row.name,
+          personType: row.personType,
+          total: row.total,
+          count: row.count,
+        })),
+        vehicleByType: fleet.byType,
       };
     },
 
@@ -362,10 +435,26 @@ export function createReportsService(deps: {
         });
       }
 
+      /*
+       * The ingredient view. The percentage is computed from the FIRST and LAST
+       * landed cost in the window, not from the min and max: a one-off expensive
+       * emergency purchase is not a trend, but a steady creep is.
+       */
+      const byIngredient = (inventory?.purchasesByIngredient(range.fromDate, range.toDate) ?? []).map(
+        (row) => ({
+          ...row,
+          changeX100:
+            row.firstCostMilli && row.lastCostMilli && row.firstCostMilli > 0
+              ? Math.round(((row.lastCostMilli - row.firstCostMilli) * 10_000) / row.firstCostMilli)
+              : null,
+        }),
+      );
+
       return {
         from: range.fromDate,
         to: range.toDate,
         rows: built.rows,
+        byIngredient,
         // Money is counted over posted bills only; a voided delivery is not a cost.
         paid: live.reduce((total, row) => total + row.paidAmount, 0),
         received: live.reduce((total, row) => total + row.total, 0),
@@ -424,11 +513,46 @@ export function createReportsService(deps: {
         byDay.set(row.spentOn, { count: day.count + 1, total: day.total + row.amount });
       }
 
+      /*
+       * The other three cost ledgers, named and totalled but deliberately NOT added
+       * into `total`. The plan (§9.3) wants them visible on this screen so the owner
+       * sees the whole hisab in one place, and separate so nothing is counted twice:
+       * `total` stays "what I typed here".
+       */
+      const salary = staff.salaryPaidBetween(range.fromDate, range.toDate);
+      const fleet = vehicles.expensesBetween(range.fromDate, range.toDate);
+      const wasted = stockOps?.wastageReport(range.fromDate, range.toDate);
+
+      const otherCosts: ExpenseReport['otherCosts'] = [
+        {
+          key: 'salaries',
+          label: 'Salaries paid',
+          total: salary.total,
+          count: salary.count,
+          source: 'Salaries page',
+        },
+        {
+          key: 'vehicles',
+          label: 'Vehicle fuel and repairs',
+          total: fleet.total,
+          count: fleet.count,
+          source: 'Vehicles page',
+        },
+        {
+          key: 'wastage',
+          label: 'Wastage (cost of food thrown away)',
+          total: wasted?.total ?? 0,
+          count: wasted?.rows.reduce((total, row) => total + row.movements, 0) ?? 0,
+          source: 'Stock → Wastage',
+        },
+      ];
+
       return {
         from: range.fromDate,
         to: range.toDate,
         total: active.reduce((total, row) => total + row.amount, 0),
         count: active.length,
+        otherCosts,
         byCategory: expenses?.summary(range.fromDate, range.toDate).rows ?? [],
         byPaidFrom: Array.from(byPaidFrom.entries())
           .map(([paidFrom, value]) => ({

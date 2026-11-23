@@ -812,6 +812,66 @@ export function createInventoryRepository(db: AppDatabase) {
     },
 
     /**
+     * Purchases grouped by ingredient, with the first and last price paid (4.G).
+     *
+     * `firstCost`/`lastCost` are what makes a price trend readable: a supplier who
+     * has crept from Rs 690 to Rs 750 a kilo over three months shows up as a
+     * percentage, which is the figure that actually prompts a phone call.
+     * Voided bills are excluded — a delivery that was sent back did not set a price.
+     */
+    purchasesByIngredient(fromDate: string, toDate: string) {
+      return db
+        .prepare(
+          `SELECT i.id AS ingredientId,
+                  i.name AS name,
+                  i.base_unit AS baseUnit,
+                  COUNT(DISTINCT p.id) AS purchaseCount,
+                  COALESCE(SUM(pi.qty_base), 0) AS qtyBase,
+                  COALESCE(SUM(pi.line_total), 0) AS spend,
+                  MIN(pi.landed_cost_milli) AS minCostMilli,
+                  MAX(pi.landed_cost_milli) AS maxCostMilli,
+                  (
+                    SELECT first_price.landed_cost_milli
+                      FROM purchase_items first_price
+                      JOIN purchases first_bill ON first_bill.id = first_price.purchase_id
+                     WHERE first_price.ingredient_id = i.id
+                       AND first_bill.status = 'posted'
+                       AND date(first_bill.purchased_on) BETWEEN ? AND ?
+                     ORDER BY first_bill.purchased_on ASC, first_price.id ASC
+                     LIMIT 1
+                  ) AS firstCostMilli,
+                  (
+                    SELECT last_price.landed_cost_milli
+                      FROM purchase_items last_price
+                      JOIN purchases last_bill ON last_bill.id = last_price.purchase_id
+                     WHERE last_price.ingredient_id = i.id
+                       AND last_bill.status = 'posted'
+                       AND date(last_bill.purchased_on) BETWEEN ? AND ?
+                     ORDER BY last_bill.purchased_on DESC, last_price.id DESC
+                     LIMIT 1
+                  ) AS lastCostMilli
+             FROM purchase_items pi
+             JOIN purchases p ON p.id = pi.purchase_id
+             JOIN ingredients i ON i.id = pi.ingredient_id
+            WHERE p.status = 'posted' AND date(p.purchased_on) BETWEEN ? AND ?
+            GROUP BY i.id
+            ORDER BY spend DESC`,
+        )
+        .all(fromDate, toDate, fromDate, toDate, fromDate, toDate) as Array<{
+        ingredientId: number;
+        name: string;
+        baseUnit: Ingredient['baseUnit'];
+        purchaseCount: number;
+        qtyBase: number;
+        spend: number;
+        minCostMilli: number;
+        maxCostMilli: number;
+        firstCostMilli: number | null;
+        lastCostMilli: number | null;
+      }>;
+    },
+
+    /**
      * Ingredients whose average cost rose over the last 30 days (4.G).
      *
      * Compares the newest landed cost of a posted purchase with the average the

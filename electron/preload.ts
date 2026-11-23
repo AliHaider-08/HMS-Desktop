@@ -160,6 +160,7 @@ const api: RendererApi = {
     movements: (ingredientId, limit = 100) =>
       invoke(CHANNELS.stockMovements, { ingredientId, limit }),
     recordWastage: (input) => invoke(CHANNELS.stockWastage, input),
+    supplierReturn: (input) => invoke(CHANNELS.stockSupplierReturn, input),
     adjust: (input) => invoke(CHANNELS.stockAdjust, input),
     wastageReport: (range) => invoke(CHANNELS.stockWastageReport, range),
     counts: () => invoke(CHANNELS.stockCounts),
@@ -183,6 +184,11 @@ const api: RendererApi = {
     void: (input) => invoke(CHANNELS.expenseVoid, input),
     saveCategory: (input) => invoke(CHANNELS.expenseCategorySave, input),
     deleteCategory: (input) => invoke(CHANNELS.expenseCategoryDelete, input),
+    recurringBills: (period) => invoke(CHANNELS.recurringBills, { period }),
+    saveRecurringBill: (input) => invoke(CHANNELS.recurringBillSave, input),
+    deleteRecurringBill: (input) => invoke(CHANNELS.recurringBillDelete, input),
+    settleRecurringBill: (input) => invoke(CHANNELS.recurringBillSettle, input),
+    unsettleRecurringBill: (input) => invoke(CHANNELS.recurringBillUnsettle, input),
   },
 
   users: {

@@ -4,6 +4,7 @@ import {
   Ban,
   Boxes,
   CircleDollarSign,
+  PackageOpen,
   PackagePlus,
   Pencil,
   ScrollText,
@@ -34,6 +35,7 @@ import { PurchaseDetailModal } from './PurchaseDetailModal';
 import { IngredientDetailModal } from './IngredientDetailModal';
 import { WastageTab } from './WastageTab';
 import { StockCountsTab } from './StockCountsTab';
+import { OpeningStockModal } from './OpeningStockModal';
 
 type Tab = 'levels' | 'purchases' | 'suppliers' | 'wastage' | 'counts';
 
@@ -65,6 +67,7 @@ export function StockPage() {
 
   const [ingredientModal, setIngredientModal] = useState<Ingredient | 'new' | null>(null);
   const [starterOpen, setStarterOpen] = useState(false);
+  const [openingOpen, setOpeningOpen] = useState(false);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [supplierModal, setSupplierModal] = useState<Supplier | 'new' | null>(null);
   const [deleteIngredient, setDeleteIngredient] = useState<Ingredient | null>(null);
@@ -434,6 +437,10 @@ export function StockPage() {
                   <Boxes aria-hidden className="h-4 w-4" />
                   Load starter list
                 </Button>
+                <Button variant="secondary" onClick={() => setOpeningOpen(true)}>
+                  <PackageOpen aria-hidden className="h-4 w-4" />
+                  Opening stock
+                </Button>
                 <Button variant="secondary" onClick={() => setIngredientModal('new')}>
                   <Plus aria-hidden className="h-4 w-4" />
                   New ingredient
@@ -610,6 +617,13 @@ export function StockPage() {
         isOpen={starterOpen}
         existingNames={existingNames}
         onClose={() => setStarterOpen(false)}
+        onSaved={reloadAll}
+      />
+
+      <OpeningStockModal
+        isOpen={openingOpen}
+        ingredients={ingredients}
+        onClose={() => setOpeningOpen(false)}
         onSaved={reloadAll}
       />
 

@@ -263,6 +263,7 @@ export const exportReportSchema = z.object({
     'item_profit',
     'stock_value',
     'purchases',
+    'purchases_by_ingredient',
     'wastage',
     'expenses',
   ]),
@@ -643,12 +644,26 @@ export const openingStockSchema = z.object({
     .array(
       z.object({
         ingredientId: idField,
-        qtyBase: z.number(message).int().min(0).max(1_000_000_000),
-        unitCostMilli: z.number(message).int().min(0).max(1_000_000_000_000),
+        /**
+         * Zero is allowed and the service skips it — a sheet where the owner filled
+         * one box and left the rest at 0 is perfectly normal. A NEGATIVE is refused
+         * outright: opening stock can only add, and silently accepting a minus here
+         * would be a way to remove stock without a reason.
+         */
+        qtyBase: z
+          .number(message)
+          .int('Use whole base units')
+          .min(0, 'Opening stock cannot be negative')
+          .max(1_000_000_000, 'That quantity is too large'),
+        unitCostMilli: z
+          .number(message)
+          .int()
+          .min(0, 'A cost cannot be negative')
+          .max(1_000_000_000_000, 'That cost is too large'),
       }),
     )
     .min(1, 'Enter at least one quantity')
-    .max(500),
+    .max(500, 'That is too many lines in one go'),
 });
 
 /* --------------------------- Recipes (4.C) --------------------------- */
@@ -776,6 +791,22 @@ export const adjustmentSchema = z.object({
     .max(200, 'Reason is too long'),
 });
 
+export const supplierReturnSchema = z.object({
+  ingredientId: idField,
+  qtyBase: z
+    .number(message)
+    .int('Use a whole number of base units')
+    .min(1, 'The quantity must be more than zero')
+    .max(100_000_000, 'That quantity is too large'),
+  supplierId: z.number().int().positive().nullable().default(null),
+  reason: z
+    .string(message)
+    .trim()
+    .min(3, 'Say why it is going back')
+    .max(200, 'Reason is too long'),
+  happenedOn: dateField,
+});
+
 export const countLineSchema = z.object({
   ingredientId: idField,
   countedQty: z
@@ -801,3 +832,50 @@ export const stockCountSchema = z
   );
 
 export const stockReportRangeSchema = z.object({ fromDate: dateField, toDate: dateField });
+
+/* ------------------------ recurring bills (4.E2) ------------------------ */
+
+export const recurringBillSchema = z.object({
+  id: z.number().int().positive().optional(),
+  categoryId: idField,
+  name: nameField('Bill name'),
+  typicalAmount: paisaField.default(0),
+  dueDay: z
+    .number(message)
+    .int('Use a whole day of the month')
+    .min(1, 'The due day must be between 1 and 31')
+    .max(31, 'The due day must be between 1 and 31'),
+  remindDays: z
+    .number(message)
+    .int()
+    .min(0, 'Remind at least on the day')
+    .max(30, 'That is too long before the due date'),
+  payee: optionalText(120, 'Paid to'),
+  paidFrom: z.enum(['cash', 'bank', 'other'], message),
+  notes: optionalText(300, 'Notes'),
+  active: z.boolean(message).default(true),
+});
+
+export const recurringBillSettleSchema = z.object({
+  templateId: idField,
+  // `YYYY-MM` — the month being settled.
+  period: z.string(message).regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Choose a month'),
+  status: z.enum(['paid', 'skipped'], message),
+  /** 0 for a skip, so the same form can post either decision. */
+  amount: paisaField.default(0),
+  note: optionalText(200, 'Note'),
+});
+
+export const recurringBillPeriodSchema = z
+  .object({
+    templateId: idField,
+    period: z.string(message).regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Choose a month'),
+  })
+  .optional();
+
+export const recurringBillsQuerySchema = z.object({
+  period: z
+    .string(message)
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Choose a month')
+    .optional(),
+});

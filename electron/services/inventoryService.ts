@@ -16,6 +16,7 @@ import type {
   StockCountInput,
   Supplier,
   SupplierInput,
+  SupplierReturnInput,
   WastageInput,
   WastageOverview,
 } from '../../src/types/api';
@@ -602,6 +603,53 @@ export function createInventoryService(deps: {
      * 50"; an adjustment says "I know exactly what happened". The audit trail keeps
      * them apart so the variance report is not polluted by explained corrections.
      */
+    /**
+     * Send stock back to the supplier (4.F).
+     *
+     * The bill is NOT voided — the rest of the delivery was kept and is being sold —
+     * so this is a separate `supplier_return` movement at the current average cost.
+     * The owner takes the printout to the supplier and claims the credit; the app's
+     * job is to make sure the shelf and the ledger agree that the food is gone.
+     */
+    supplierReturn(input: SupplierReturnInput, createdBy: number): StockMovement {
+      const ingredient = ingredientOrFail(input.ingredientId);
+
+      if (!Number.isInteger(input.qtyBase) || input.qtyBase <= 0) {
+        throw new AppError('VALIDATION_ERROR', 'The quantity must be a whole number above zero');
+      }
+      if (input.qtyBase > ingredient.qtyOnHand) {
+        throw new AppError(
+          'CONFLICT',
+          `Only ${ingredient.qtyOnHand} ${ingredient.baseUnit} of ${ingredient.name} is on the shelf, so ${input.qtyBase} cannot go back.`,
+        );
+      }
+
+      const supplierName = input.supplierId
+        ? (inventory.findSupplier(input.supplierId)?.name ?? 'the supplier')
+        : 'the supplier';
+
+      inventory.transaction(() => {
+        inventory.applyMovement({
+          ingredientId: ingredient.id,
+          kind: 'supplier_return',
+          qty: -input.qtyBase,
+          unitCostMilli: ingredient.avgCostMilli,
+          reason: `Returned to ${supplierName}: ${input.reason.trim()}`,
+          createdBy,
+        });
+      });
+
+      logInfo(
+        `Supplier return: ${input.qtyBase} ${ingredient.baseUnit} of ${ingredient.name} to ${supplierName}`,
+      );
+
+      const movement = inventory
+        .movementsFor(ingredient.id, 5)
+        .find((row) => row.kind === 'supplier_return');
+      if (!movement) throw new AppError('INTERNAL_ERROR', 'The return could not be read back');
+      return movement;
+    },
+
     adjust(input: AdjustmentInput, createdBy: number): StockMovement {
       const ingredient = ingredientOrFail(input.ingredientId);
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Undo2 } from 'lucide-react';
 import type { IngredientDetail, StockMovement, StockMovementKind } from '../../types/api';
 import { errorMessage, getApi, unwrap } from '../../utils/api';
 import { formatAmount, formatDate, formatDateTime } from '../../utils/format';
@@ -9,6 +9,9 @@ import { Table, type Column } from '../../components/Table';
 import { Badge } from '../../components/Badge';
 import { Alert } from '../../components/Alert';
 import { useAsync } from '../../hooks/useAsync';
+import { useAuth } from '../../hooks/useAuth';
+import { Button } from '../../components/Button';
+import { SupplierReturnModal } from './SupplierReturnModal';
 
 interface IngredientDetailModalProps {
   ingredientId: number;
@@ -55,6 +58,13 @@ const MOVEMENT_TONE: Record<StockMovementKind, 'success' | 'danger' | 'neutral'>
 
 export function IngredientDetailModal({ ingredientId, onClose }: IngredientDetailModalProps) {
   const [tab, setTab] = useState<'movements' | 'prices' | 'recipes'>('movements');
+  const [returnOpen, setReturnOpen] = useState(false);
+  const { allow } = useAuth();
+  const canReturn = allow('stock:adjust');
+
+  // The supplier picker only needs the list, so it is loaded with the detail rather
+  // than passed down from the page — this modal can be opened from anywhere.
+  const suppliers = useAsync(async () => unwrap(await getApi().stock.suppliers()), []);
 
   const detail = useAsync(
     async () => unwrap(await getApi().stock.ingredient({ id: ingredientId })),
@@ -142,6 +152,15 @@ export function IngredientDetailModal({ ingredientId, onClose }: IngredientDetai
       }
       onClose={onClose}
       size="lg"
+      footer={
+        ingredient &&
+        canReturn && (
+          <Button variant="secondary" onClick={() => setReturnOpen(true)}>
+            <Undo2 aria-hidden className="h-4 w-4" />
+            Return to supplier
+          </Button>
+        )
+      }
     >
       <div className="flex flex-col gap-4">
         {detail.error && <Alert tone="error">{errorMessage(detail.error)}</Alert>}
@@ -327,6 +346,16 @@ export function IngredientDetailModal({ ingredientId, onClose }: IngredientDetai
           </p>
         )}
       </div>
+      {ingredient && returnOpen && (
+        <SupplierReturnModal
+          ingredient={ingredient}
+          suppliers={suppliers.data ?? []}
+          onClose={() => setReturnOpen(false)}
+          onSaved={() => {
+            void detail.reload();
+          }}
+        />
+      )}
     </Modal>
   );
 }

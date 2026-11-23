@@ -716,6 +716,19 @@ export interface DashboardStats {
   todayExpenses: number;
   /** Active menu items with no recipe, so their profit is unknown. */
   missingRecipes: number;
+  /**
+   * Monthly bills due now or already late (4.E2). Read-only: the dashboard says the
+   * rent is due, the Expenses page books it — a screen that opens on the counter
+   * must never move money by itself.
+   */
+  billsDue: Array<{
+    id: number;
+    name: string;
+    dueDate: string;
+    daysUntilDue: number;
+    typicalAmount: number;
+    overdue: boolean;
+  }>;
   /** Ingredient price rises over the last 30 days, worst first. */
   priceChecks: Array<{
     ingredientId: number;
@@ -1084,6 +1097,24 @@ export interface WastageInput {
   happenedOn: string;
 }
 
+/**
+ * Returning stock to the supplier (4.F).
+ *
+ * Not a void: the bill stands because the rest of the delivery was kept, and the
+ * supplier owes a credit for what went back. Not a wastage either — the food is not
+ * lost, it left the shop on purpose. The ledger gets a `supplier_return` movement so
+ * the stock leaves at the current average cost and the money can be claimed back.
+ */
+export interface SupplierReturnInput {
+  ingredientId: number;
+  /** Positive base units going back; the service makes it negative. */
+  qtyBase: number;
+  supplierId: number | null;
+  /** Why it went back — damaged in transit, wrong item, short date. */
+  reason: string;
+  happenedOn: string;
+}
+
 export interface AdjustmentInput {
   ingredientId: number;
   /** Signed base units: positive finds stock, negative removes it. */
@@ -1122,6 +1153,7 @@ export interface StockApi {
 
   /* 4.F — wastage, adjustments and counts */
   recordWastage(input: WastageInput): Promise<ApiResult<StockMovement>>;
+  supplierReturn(input: SupplierReturnInput): Promise<ApiResult<StockMovement>>;
   adjust(input: AdjustmentInput): Promise<ApiResult<StockMovement>>;
   wastageReport(range: { fromDate: string; toDate: string }): Promise<ApiResult<WastageOverview>>;
   counts(): Promise<ApiResult<StockCount[]>>;
@@ -1200,6 +1232,85 @@ export interface ExpenseInput {
   notes: string;
 }
 
+/* ------------------------- recurring bills (4.E2) ------------------------ */
+
+export interface RecurringBill {
+  id: number;
+  categoryId: number;
+  categoryName: string;
+  name: string;
+  /** Typical amount in paisa; 0 means "unknown, ask me". Never posts by itself. */
+  typicalAmount: number;
+  /** Day of the month it is due (1–31). In a short month, 31 means the last day. */
+  dueDay: number;
+  /** Days before the due date the dashboard starts warning. */
+  remindDays: number;
+  payee: string;
+  paidFrom: ExpensePaidFrom;
+  notes: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecurringBillPayment {
+  id: number;
+  templateId: number;
+  /** `YYYY-MM` — the month this settles. */
+  period: string;
+  /** The expense it created, so the money is counted exactly once. */
+  expenseId: number | null;
+  amount: number;
+  status: 'paid' | 'skipped';
+  note: string;
+  createdAt: string;
+}
+
+/**
+ * One bill in one month, resolved against today.
+ *
+ * `state` is the whole point of the screen:
+ *   * `paid`    — settled this month,
+ *   * `skipped` — the owner decided not to pay this month,
+ *   * `due`     — the due date is within `remindDays`,
+ *   * `overdue` — the due date has passed and nothing was recorded,
+ *   * `upcoming`— later this month.
+ */
+export interface RecurringBillStatus {
+  bill: RecurringBill;
+  /** The month being described, `YYYY-MM`. */
+  period: string;
+  /** The date it is due in that month, `YYYY-MM-DD`. */
+  dueDate: string;
+  /** Days from today to the due date; negative once it has passed. */
+  daysUntilDue: number;
+  state: 'paid' | 'skipped' | 'due' | 'overdue' | 'upcoming';
+  payment: RecurringBillPayment | null;
+}
+
+export interface RecurringBillsOverview {
+  /** The month these statuses describe. */
+  period: string;
+  rows: RecurringBillStatus[];
+  /** Bills that need attention: due today/soon or overdue, and unpaid. */
+  needsAttention: number;
+  /** What those outstanding bills typically come to, in paisa. */
+  outstandingTypical: number;
+}
+
+export interface RecurringBillInput {
+  id?: number;
+  categoryId: number;
+  name: string;
+  typicalAmount: number;
+  dueDay: number;
+  remindDays: number;
+  payee: string;
+  paidFrom: ExpensePaidFrom;
+  notes: string;
+  active: boolean;
+}
+
 export interface ExpenseApi {
   overview(input: {
     from: string;
@@ -1214,6 +1325,19 @@ export interface ExpenseApi {
     sortOrder: number;
   }): Promise<ApiResult<ExpenseCategory>>;
   deleteCategory(input: { id: number }): Promise<ApiResult<null>>;
+  recurringBills(period?: string): Promise<ApiResult<RecurringBillsOverview>>;
+  saveRecurringBill(input: RecurringBillInput): Promise<ApiResult<RecurringBill>>;
+  deleteRecurringBill(input: { id: number }): Promise<ApiResult<null>>;
+  /** Records "paid" (creating a real expense) or "skipped" for one month. */
+  settleRecurringBill(input: {
+    templateId: number;
+    period: string;
+    status: 'paid' | 'skipped';
+    amount: number;
+    note: string;
+  }): Promise<ApiResult<RecurringBillStatus>>;
+  /** Undoes a settlement, voiding the expense it created. */
+  unsettleRecurringBill(input: { templateId: number; period: string }): Promise<ApiResult<null>>;
 }
 
 export interface RecipeLine {
@@ -1556,17 +1680,37 @@ export interface ProfitAndLoss {
   linesWithoutCost: number;
   /** knownNetSales − cogs. */
   grossProfit: number;
-  /** Operating costs in the window. */
+
+  /*
+   * Operating costs, in four labelled lines rather than one total.
+   *
+   * A shop types rent into Expenses but pays wages somewhere else entirely, and the
+   * plan's own rule (§9.3) is that the same money must never be counted twice. So
+   * `shopExpenses` means ONLY the rows typed on the Expenses page, and salaries and
+   * vehicle costs are read from their own tables. If the owner also types "salaries"
+   * as an expense, nothing breaks — that is a separate row and both are real until
+   * they stop duplicating it.
+   */
   shopExpenses: number;
+  /** Salaries paid in the window, from `salary_payments.paid_on`. */
+  salaries: number;
+  /** Fuel, maintenance and repairs in the window, from `vehicle_expenses`. */
+  vehicleCosts: number;
+  /** shopExpenses + salaries + vehicleCosts — everything net profit subtracts. */
+  operatingExpenses: number;
   /** Salaries already counted inside shopExpenses (0 when none). */
   wastageValue: number;
   wastageQty: number;
-  /** grossProfit − shopExpenses. */
+  /** grossProfit − operatingExpenses. */
   netProfit: number;
   /** Cancelled bills, listed so a void never disappears from the hisab. */
   cancelledCount: number;
   cancelledValue: number;
   expensesByCategory: ExpenseSummaryRow[];
+  /** Named salary payouts in the window, so the owner can see who was paid. */
+  salariesByPerson: Array<{ name: string; personType: string; total: number; count: number }>;
+  /** Vehicle spend split by fuel / maintenance / repair / other. */
+  vehicleByType: Array<{ type: string; total: number }>;
 }
 
 /* ------------------- 4.G reports: margin, stock, purchases ---------------- */
@@ -1654,10 +1798,33 @@ export interface PurchaseReportRow {
   lineCount: number;
 }
 
+/**
+ * One ingredient's buying history in a period (4.G).
+ *
+ * `firstCostMilli` → `lastCostMilli` is the price trend: the same packet cost more
+ * this month than last, which quietly eats every margin that uses it.
+ */
+export interface PurchaseIngredientRow {
+  ingredientId: number;
+  name: string;
+  baseUnit: BaseUnit;
+  purchaseCount: number;
+  qtyBase: number;
+  spend: number;
+  minCostMilli: number;
+  maxCostMilli: number;
+  firstCostMilli: number | null;
+  lastCostMilli: number | null;
+  /** last vs first, ×100 (1200 = the price rose 12%). Null when only one price. */
+  changeX100: number | null;
+}
+
 export interface PurchaseReport {
   from: string;
   to: string;
   rows: PurchaseReportRow[];
+  /** The same purchases seen from the ingredient side, dearest first. */
+  byIngredient: PurchaseIngredientRow[];
   /** Cash actually paid, excluding voided bills. */
   paid: number;
   /** Total value of the purchases received, excluding voided bills. */
@@ -1676,12 +1843,33 @@ export interface WastageReportFull extends WastageOverview {
   worstReason: { reason: WastageReason; value: number } | null;
 }
 
+/**
+ * Costs the shop paid that were NOT typed on the Expenses page (4.G / §9.3).
+ *
+ * Salaries, vehicle running costs and wastage already live in their own tables.
+ * The plan is explicit that the report must list them as separate read-only lines
+ * rather than have the owner retype them — retyping is how the same money gets
+ * counted twice. They are shown beside the expenses but never added into `total`.
+ */
+export interface CostLine {
+  key: 'salaries' | 'vehicles' | 'wastage';
+  label: string;
+  total: number;
+  /** How many records make up the total (payouts, fuel/repair entries, wasted lines). */
+  count: number;
+  /** Where it is entered, so the line says what to do about it. */
+  source: string;
+}
+
 /** Expenses in a period, grouped for the report tab (4.G). */
 export interface ExpenseReport {
   from: string;
   to: string;
+  /** Expenses typed on the Expenses page only — never salaries or vehicle costs. */
   total: number;
   count: number;
+  /** Salaries, vehicle costs and wastage, listed but not summed into `total`. */
+  otherCosts: CostLine[];
   byCategory: ExpenseSummaryRow[];
   byPaidFrom: Array<{ paidFrom: ExpensePaidFrom; count: number; total: number }>;
   byDay: Array<{ date: string; count: number; total: number }>;
@@ -1718,6 +1906,7 @@ export type ExportReportName =
   | 'item_profit'
   | 'stock_value'
   | 'purchases'
+  | 'purchases_by_ingredient'
   | 'wastage'
   | 'expenses';
 
@@ -1890,6 +2079,7 @@ export const CHANNELS = {
   stockWastage: 'stock:wastage',
   stockAdjust: 'stock:adjust',
   stockWastageReport: 'stock:wastage-report',
+  stockSupplierReturn: 'stock:supplier-return',
   stockCounts: 'stock:counts',
   stockCountGet: 'stock:count',
   stockCountSave: 'stock:count-save',
@@ -1910,6 +2100,11 @@ export const CHANNELS = {
   expenseVoid: 'expenses:void',
   expenseCategorySave: 'expenses:category-save',
   expenseCategoryDelete: 'expenses:category-delete',
+  recurringBills: 'expenses:recurring',
+  recurringBillSave: 'expenses:recurring-save',
+  recurringBillDelete: 'expenses:recurring-delete',
+  recurringBillSettle: 'expenses:recurring-settle',
+  recurringBillUnsettle: 'expenses:recurring-unsettle',
 } as const;
 
 export type ChannelName = (typeof CHANNELS)[keyof typeof CHANNELS];
