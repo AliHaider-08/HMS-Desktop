@@ -833,6 +833,52 @@ export const stockCountSchema = z
 
 export const stockReportRangeSchema = z.object({ fromDate: dateField, toDate: dateField });
 
+/* -------------------------- sub-recipes (4.I) -------------------------- */
+
+export const subRecipeSaveSchema = z.object({
+  ingredientId: idField,
+  /**
+   * Base units one batch produces. 0 is legal and means "go back to buying it" —
+   * the schema must let the owner undo a mistake without deleting the ingredient.
+   */
+  batchYieldBase: z
+    .number(message)
+    .int('Use a whole quantity')
+    .min(0, 'A batch cannot produce a negative amount')
+    .max(100_000_000, 'That batch size is too large'),
+  lines: z
+    .array(
+      z.object({
+        componentId: idField,
+        qtyBase: z
+          .number(message)
+          .int('Use a whole quantity (grams, ml or pieces)')
+          .positive('Every component needs a quantity')
+          .max(100_000_000, 'That quantity is too large'),
+        wastePercentX100: z
+          .number(message)
+          .int()
+          .min(0, 'The waste allowance cannot be negative')
+          .max(5000, 'The waste allowance must be 50% or less')
+          .default(0),
+      }),
+    )
+    .max(100, 'That is too many components'),
+});
+
+export const subRecipeMakeSchema = z.object({
+  ingredientId: idField,
+  batches: z
+    .number(message)
+    .int('Make whole batches')
+    .positive('Make at least one batch')
+    .max(1000, 'That is too many batches at once'),
+  madeOn: dateField.optional(),
+  notes: optionalText(200, 'Notes'),
+});
+
+export const subRecipeIngredientSchema = z.object({ ingredientId: idField });
+
 /* ------------------------ recurring bills (4.E2) ------------------------ */
 
 export const recurringBillSchema = z.object({

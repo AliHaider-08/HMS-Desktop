@@ -41,6 +41,8 @@ const MOVEMENT_LABELS: Record<StockMovementKind, string> = {
   adjustment: 'Adjustment',
   supplier_return: 'Returned to supplier',
   stock_count: 'Stock count',
+  sub_recipe_make: 'Batch made',
+  sub_recipe_unmake: 'Batch undone',
 };
 
 /** Which movements add stock, which remove it, and which are a correction. */
@@ -53,6 +55,11 @@ const MOVEMENT_TONE: Record<StockMovementKind, 'success' | 'danger' | 'neutral'>
   wastage: 'danger',
   adjustment: 'neutral',
   supplier_return: 'danger',
+  // A batch is signed like any other movement: the components come off (negative)
+  // and the product goes on (positive). Showing both under one label is honest —
+  // the qty column already carries the direction.
+  sub_recipe_make: 'neutral',
+  sub_recipe_unmake: 'neutral',
   stock_count: 'neutral',
 };
 

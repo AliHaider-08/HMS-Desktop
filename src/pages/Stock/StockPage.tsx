@@ -36,14 +36,16 @@ import { IngredientDetailModal } from './IngredientDetailModal';
 import { WastageTab } from './WastageTab';
 import { StockCountsTab } from './StockCountsTab';
 import { OpeningStockModal } from './OpeningStockModal';
+import { HouseMadeTab } from './HouseMadeTab';
 
-type Tab = 'levels' | 'purchases' | 'suppliers' | 'wastage' | 'counts';
+type Tab = 'levels' | 'purchases' | 'suppliers' | 'wastage' | 'counts' | 'house-made';
 
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'levels', label: 'Stock levels' },
   { value: 'purchases', label: 'Purchases' },
   { value: 'wastage', label: 'Wastage' },
   { value: 'counts', label: 'Stock counts' },
+  { value: 'house-made', label: 'House-made' },
   { value: 'suppliers', label: 'Suppliers' },
 ];
 
@@ -575,6 +577,17 @@ export function StockPage() {
         <StockCountsTab
           ingredients={ingredients}
           canWrite={allow('stock:adjust')}
+          onChanged={() => {
+            void reloadAll();
+          }}
+        />
+      )}
+
+      {tab === 'house-made' && (
+        <HouseMadeTab
+          ingredients={ingredients}
+          canWrite={allow('inventory:write')}
+          canAdjust={allow('stock:adjust')}
           onChanged={() => {
             void reloadAll();
           }}

@@ -35,6 +35,11 @@ if (!existsSync(compiledDir)) {
 
 const load = (relative) => require(path.join(compiledDir, relative));
 
+// The same month maths the app uses. The preview serves the renderer from a browser,
+// so it has no access to the Electron main process and must build these itself —
+// importing them rather than re-deriving keeps the two from drifting.
+const { monthStart, monthEnd } = load('utils/datetime.js');
+
 const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gulkhan-preview-'));
 const { openDatabase, closeDatabase, getDatabase } = load('db/connection.js');
 const { runMigrations } = load('db/migrate.js');
@@ -63,6 +68,7 @@ const repos = {
   expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
   stockOps: load('db/repositories/stockOpsRepository.js').createStockOpsRepository(db),
   recurringBills: load('db/repositories/recurringBillsRepository.js').createRecurringBillsRepository(db),
+  subRecipes: load('db/repositories/subRecipeRepository.js').createSubRecipeRepository(db),
 };
 
 // Printing needs a real window. The preview throws so the UI reports it honestly,
@@ -100,7 +106,7 @@ const staffService = load('services/staffService.js').createStaffService({
   vehicles: repos.vehicles,
   commissionForMonth: (deliveryBoyId, month) =>
     repos.orders
-      .deliveriesByBoy(`${month}-01`, `${monthEnd(month)}`)
+      .deliveriesByBoy(monthStart(month), monthEnd(month))
       .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
 });
 const reportsService = load('services/reportsService.js').createReportsService({
@@ -184,6 +190,10 @@ const registry = buildRegistry({
     expenses: repos.expenses,
     shifts: repos.shifts,
     recurring: repos.recurringBills,
+  }),
+  subRecipes: load('services/subRecipeService.js').createSubRecipeService({
+    subRecipes: repos.subRecipes,
+    inventory: repos.inventory,
   }),
   recipes: load('services/recipeService.js').createRecipeService({
     recipes: repos.recipes,

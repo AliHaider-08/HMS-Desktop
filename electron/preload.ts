@@ -166,6 +166,11 @@ const api: RendererApi = {
     counts: () => invoke(CHANNELS.stockCounts),
     count: (id) => invoke(CHANNELS.stockCountGet, { id }),
     saveCount: (input) => invoke(CHANNELS.stockCountSave, input),
+    subRecipes: () => invoke(CHANNELS.subRecipes),
+    subRecipe: (input) => invoke(CHANNELS.subRecipe, input),
+    saveSubRecipe: (input) => invoke(CHANNELS.subRecipeSave, input),
+    makeSubRecipeBatch: (input) => invoke(CHANNELS.subRecipeMake, input),
+    subRecipeBatches: (input) => invoke(CHANNELS.subRecipeBatches, input),
   },
 
   recipes: {

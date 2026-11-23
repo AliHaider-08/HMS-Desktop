@@ -825,7 +825,9 @@ export type StockMovementKind =
   | 'wastage'
   | 'adjustment'
   | 'supplier_return'
-  | 'stock_count';
+  | 'stock_count'
+  | 'sub_recipe_make'
+  | 'sub_recipe_unmake';
 
 export type PurchaseStatus = 'posted' | 'void';
 
@@ -886,6 +888,11 @@ export interface Ingredient {
   lowStock: boolean;
   /** Used by at least one recipe, so it cannot be deleted, only deactivated. */
   usedInRecipes: number;
+  /**
+   * Base units one batch produces (Roadmap 4.I). 0 = bought from a supplier;
+   * > 0 = made in-house, and its cost comes from its batch recipe.
+   */
+  batchYieldBase: number;
 }
 
 export interface IngredientInput {
@@ -1133,6 +1140,118 @@ export interface StockCountInput {
   lines: CountLineInput[];
 }
 
+/* -------------------------- sub-recipes (4.I) -------------------------- */
+
+/**
+ * One component of a house-made ingredient's batch recipe.
+ *
+ * `lineCost` uses the component's live average cost, so opening the screen on a
+ * different day gives a different — correct — answer. That is the point: "what
+ * does my mayo cost me today?" moves with the price of oil.
+ */
+export interface BatchRecipeLine {
+  id: number;
+  componentId: number;
+  componentName: string;
+  baseUnit: BaseUnit;
+  /** Base units of the component in ONE batch. */
+  qtyBase: number;
+  wastePercentX100: number;
+  /** Cost per base unit at the moment the recipe was read. */
+  unitCostMilli: number;
+  /** qty × unit cost, in paisa. */
+  lineCost: number;
+  /** True when the component is itself made in-house — refused by the service. */
+  isMade: boolean;
+  onHand: number;
+}
+
+export interface BatchRecipe {
+  ingredientId: number;
+  ingredientName: string;
+  baseUnit: BaseUnit;
+  /** Base units one batch produces. 0 = bought. */
+  batchYieldBase: number;
+  lines: BatchRecipeLine[];
+  /** Cost of one batch's components, in paisa. */
+  batchCost: number;
+  /** Derived: batchCost ÷ yield. Null when the yield is not set yet. */
+  unitCostMilli: number | null;
+  isMade: boolean;
+  usedInRecipes: boolean;
+}
+
+export interface SaveBatchRecipeInput {
+  ingredientId: number;
+  /** Base units one batch produces. 0 turns the ingredient back into a bought one. */
+  batchYieldBase: number;
+  lines: Array<{ componentId: number; qtyBase: number; wastePercentX100: number }>;
+}
+
+/** One row of the "House-made" list. */
+export interface MadeIngredientRow {
+  ingredientId: number;
+  name: string;
+  baseUnit: BaseUnit;
+  qtyOnHand: number;
+  batchYieldBase: number;
+  lineCount: number;
+  batchCost: number;
+  /** What one base unit costs to make. */
+  madeUnitCostMilli: number;
+  /**
+   * Bought price − made price. Positive means making it is cheaper than buying
+   * it. Null when the ingredient has never been bought, so there is nothing to
+   * compare against.
+   */
+  comparedToBoughtMilli: number | null;
+  /** Whole batches the current shelf can supply. */
+  canMakeBatches: number;
+}
+
+/** A batch that was actually made — a stock document, frozen at its cost. */
+export interface MadeBatch {
+  id: number;
+  batchNo: string;
+  ingredientId: number;
+  ingredientName: string;
+  baseUnit: BaseUnit;
+  qtyBase: number;
+  totalCost: number;
+  unitCostMilli: number;
+  madeOn: string;
+  notes: string;
+  createdByName: string;
+  lines: Array<{
+    id: number;
+    componentId: number;
+    componentName: string;
+    baseUnit: BaseUnit;
+    qtyBase: number;
+    unitCostMilli: number;
+    cost: number;
+  }>;
+}
+
+export interface SubRecipeOverview {
+  rows: MadeIngredientRow[];
+  madeCount: number;
+  /** Made ingredients with no components yet — their cost cannot be worked out. */
+  missingRecipeCount: number;
+  recentBatches: Array<{
+    id: number;
+    batchNo: string;
+    ingredientId: number;
+    ingredientName: string;
+    baseUnit: BaseUnit;
+    qtyBase: number;
+    totalCost: number;
+    unitCostMilli: number;
+    madeOn: string;
+    createdByName: string;
+  }>;
+}
+
 export interface StockApi {
   overview(): Promise<ApiResult<StockOverview>>;
   ingredients(): Promise<ApiResult<Ingredient[]>>;
@@ -1140,6 +1259,17 @@ export interface StockApi {
   saveIngredient(input: IngredientInput): Promise<ApiResult<Ingredient>>;
   deleteIngredient(id: number): Promise<ApiResult<null>>;
   starterCatalogue(): Promise<ApiResult<StarterCatalogueGroup[]>>;
+  subRecipes(): Promise<ApiResult<SubRecipeOverview>>;
+  subRecipe(input: { ingredientId: number }): Promise<ApiResult<BatchRecipe>>;
+  saveSubRecipe(input: SaveBatchRecipeInput): Promise<ApiResult<BatchRecipe>>;
+  /** Takes the components off the shelf and puts the product on, at a derived cost. */
+  makeSubRecipeBatch(input: {
+    ingredientId: number;
+    batches: number;
+    madeOn?: string;
+    notes?: string;
+  }): Promise<ApiResult<MadeBatch>>;
+  subRecipeBatches(input: { ingredientId: number }): Promise<ApiResult<MadeBatch[]>>;
   loadStarterList(input: LoadStarterListInput): Promise<ApiResult<LoadStarterListResult>>;
   suppliers(): Promise<ApiResult<Supplier[]>>;
   saveSupplier(input: SupplierInput): Promise<ApiResult<Supplier>>;
@@ -2065,6 +2195,11 @@ export const CHANNELS = {
   ingredientDelete: 'stock:ingredient-delete',
   starterCatalogue: 'stock:starter-catalogue',
   starterLoad: 'stock:starter-load',
+  subRecipes: 'stock:sub-recipes',
+  subRecipe: 'stock:sub-recipe',
+  subRecipeSave: 'stock:sub-recipe-save',
+  subRecipeMake: 'stock:sub-recipe-make',
+  subRecipeBatches: 'stock:sub-recipe-batches',
   suppliers: 'stock:suppliers',
   supplierSave: 'stock:supplier-save',
   supplierDelete: 'stock:supplier-delete',

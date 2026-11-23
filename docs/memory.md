@@ -7,7 +7,7 @@
 Fast Food Management Desktop App (Electron + React + SQLite)
 
 ## Current Status
-- Current phase: **Roadmap Phase 4 complete — 4.A → 4.H all done (400 checks / 24 suites).**
+- Current phase: **Roadmap Phase 4 complete — 4.A → 4.I all done (410 checks / 25 suites).**
 - Original six phases and the roadmap hardening are complete and merged.
 - File currently being worked on: `docs/memory.md` (last code files:
   `src/pages/Expenses/RecurringBillsPanel.tsx`, `src/pages/Stock/SupplierReturnModal.tsx`,
@@ -63,7 +63,7 @@ PR #2 (`arena/7b07c844-gul-khan-fast-food` → `main`) carries phases 2–6; all
 
 ## Verification (headless)
 `npm run verify` runs typecheck + lint + all phase tests.
-Last result: **400 checks passed, 0 failed across 24 suites** (`npm run test:all`), stable across
+Last result: **410 checks passed, 0 failed across 25 suites** (`npm run test:all`), stable across
 repeated runs.
 
 | Suite | Checks |
@@ -78,6 +78,7 @@ repeated runs.
 | Phase 8–22 (roadmap, hardening, Phase 4) | 240 |
 | Phase 23 (`scripts/test-phase23.mjs`) — salaries + vehicle costs in the P&L | 8 |
 | Phase 24 (`scripts/test-phase24.mjs`) — opening stock, supplier returns, price trend, recurring bills | 16 |
+| Phase 25 (`scripts/test-phase25.mjs`) — house-made ingredients (sub-recipes) | 10 |
 
 ## Decisions Made
 - Electron 45, React 19, Vite 7, TypeScript 5.9, Tailwind 3, Zustand 5, React Router 7 (hash
@@ -272,9 +273,9 @@ The five things that were fine in a demo and wrong in a shop. Each has a test in
   **Load older orders** button and discards accumulated pages when a filter changes (in the filter
   setter, not an effect — the React compiler rejects `setState` inside `useEffect`).
 
-## Phase 4 — Inventory, recipes and expenses (migrations 015–022)
+## Phase 4 — Inventory, recipes and expenses (migrations 015–023)
 
-The client's six requirements, in the app. 400 checks across 24 suites, `npm run verify` green.
+The client's six requirements, in the app. 410 checks across 25 suites, `npm run verify` green.
 
 ### 4.H — follow-up round (migrations 022)
 
@@ -293,9 +294,29 @@ Three rules worth remembering, because they are easy to "simplify" back into bug
 - A supplier return is **not a void**. The bill stays posted; only the returned quantity leaves
   the shelf, valued at the current average so the shelf is never repriced.
 
-**Still deferred: sub-recipes.** Waiting on §15 question 4 (does the kitchen make its own sauces
-or marinate chicken in-house?). An ingredient made from ingredients needs a self-reference in
-`recipe_items`; guessing before that answer would shape the schema on a hunch.
+### 4.I — house-made ingredients / sub-recipes (migration 023)
+
+`test-phase25.mjs` (10 checks). An ingredient can be made instead of bought.
+
+- `ingredients.batch_yield_base > 0` means "one batch makes this much"; `0` means bought.
+- `ingredient_recipe_items` is the batch recipe; the cost is **derived**
+  (`Σ components ÷ yield`), never typed, so it follows live component prices.
+- `sub_recipe_batches` is a stock document: components come off as `sub_recipe_make`,
+  the product goes on at the computed cost. **Frozen at the batch** — a later price rise
+  never rewrites an old batch.
+- **Value-neutral**: the test asserts the signed sum of every `sub_recipe_make` movement is
+  zero, which is what catches a rounding rule applied on one side only.
+- **One level only** — a house-made ingredient cannot be a component of another. The service
+  refuses and says to use the raw ingredients instead.
+- `applyMovement` treats `sub_recipe_make` like a purchase for AVERAGE COST purposes. Without
+  this, house mayo sat at a zero average and every burger using it looked free.
+
+**Migration 023 rebuilds the whole `stock_movements` table** (SQLite cannot alter a CHECK
+constraint) to add the two new kinds. With `foreign_keys = ON`, dropping the old table fails
+while rows reference it, so the migration renames, recreates, copies (keeping ids), and leaves
+the emptied original as `stock_movements_legacy_016`. `ref_batch_id` is added at the same time.
+The repository probes for that column and the batch-yield column, so a database that has not run
+023 degrades instead of crashing.
 
 ### What exists now
 

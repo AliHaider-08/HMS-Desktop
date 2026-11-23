@@ -9,12 +9,17 @@ import {
   purchaseSchema,
   stockCountSchema,
   stockReportRangeSchema,
+  subRecipeIngredientSchema,
+  subRecipeMakeSchema,
+  subRecipeSaveSchema,
   supplierReturnSchema,
   supplierSchema,
   voidPurchaseSchema,
   wastageSchema,
 } from '../../src/types/schemas';
 import type { InventoryService } from '../services/inventoryService';
+import type { SubRecipeService } from '../services/subRecipeService';
+import { AppError } from '../utils/errors';
 import type { HandlerContext, HandlerRegistry } from './registry';
 
 /* Shape-only schemas; business rules live in inventoryService. */
@@ -28,7 +33,11 @@ const movementsSchema = z.object({
 });
 
 /** Stock levels, ingredients, suppliers and purchases (Roadmap Phase 4.A / 4.B). */
-export function stockHandlers(inventory: InventoryService): HandlerRegistry {
+export function stockHandlers(
+  inventory: InventoryService,
+  /** Sub-recipes (4.I). Absent on a database that has not run 023. */
+  subRecipes?: SubRecipeService,
+): HandlerRegistry {
   return {
     /* ----------------------------- stock levels ----------------------------- */
 
@@ -198,5 +207,55 @@ export function stockHandlers(inventory: InventoryService): HandlerRegistry {
       handler: (input: Parameters<InventoryService['saveCount']>[0], context: HandlerContext) =>
         inventory.saveCount(input, context.user.id),
     },
+
+    /* --------------------------- sub-recipes (4.I) --------------------------- */
+
+    [CHANNELS.subRecipes]: {
+      // Reading the cost of a house-made sauce is a cost figure, so it is
+      // `costs:read` like every other margin in the app — not `inventory:read`.
+      capability: 'costs:read',
+      schema: z.object({}).optional(),
+      handler: () => requireSubRecipes().overview(),
+    },
+
+    [CHANNELS.subRecipe]: {
+      capability: 'costs:read',
+      schema: subRecipeIngredientSchema,
+      handler: (input: { ingredientId: number }) => requireSubRecipes().recipe(input.ingredientId),
+    },
+
+    [CHANNELS.subRecipeSave]: {
+      capability: 'inventory:write',
+      schema: subRecipeSaveSchema,
+      handler: (input: Parameters<SubRecipeService['saveRecipe']>[0]) =>
+        requireSubRecipes().saveRecipe(input),
+    },
+
+    [CHANNELS.subRecipeMake]: {
+      // Making a batch moves stock, so it needs the same right as an adjustment.
+      capability: 'stock:adjust',
+      schema: subRecipeMakeSchema,
+      handler: (
+        input: Parameters<SubRecipeService['makeBatch']>[0],
+        context: HandlerContext,
+      ) => requireSubRecipes().makeBatch(input, context.user.id),
+    },
+
+    [CHANNELS.subRecipeBatches]: {
+      capability: 'costs:read',
+      schema: subRecipeIngredientSchema,
+      handler: (input: { ingredientId: number }) =>
+        requireSubRecipes().batchesFor(input.ingredientId),
+    },
   };
+
+  function requireSubRecipes(): SubRecipeService {
+    if (!subRecipes) {
+      throw new AppError(
+        'CONFLICT',
+        'House-made ingredients are not available in this database. Restart the app.',
+      );
+    }
+    return subRecipes;
+  }
 }

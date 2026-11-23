@@ -42,6 +42,7 @@ interface IngredientRow {
   supplier_name: string | null;
   active: number;
   used_in_recipes: number;
+  batch_yield_base: number;
 }
 
 interface PurchaseRow {
@@ -150,6 +151,7 @@ const toIngredient = (row: IngredientRow): Ingredient => ({
   stockValue: stockValuePaisa(row.qty_on_hand, row.avg_cost_milli),
   lowStock: row.qty_on_hand <= row.reorder_level,
   usedInRecipes: row.used_in_recipes,
+  batchYieldBase: row.batch_yield_base,
 });
 
 const toPurchaseLine = (row: PurchaseLineRow): PurchaseLine => ({
@@ -219,6 +221,10 @@ function tableExists(db: AppDatabase, name: string): boolean {
 
 export function createInventoryRepository(db: AppDatabase) {
   const hasRecipes = tableExists(db, 'recipe_items');
+  // 023 adds the column. A database that has not run it yet reads 0 (bought).
+  const hasBatchYield = Boolean(
+    db.prepare("SELECT 1 FROM pragma_table_info('ingredients') WHERE name = 'batch_yield_base'").get(),
+  );
   const hasPurchases = tableExists(db, 'purchases');
 
   /** Credit balance per supplier, or 0 while the purchases table does not exist. */
@@ -234,6 +240,7 @@ export function createInventoryRepository(db: AppDatabase) {
     SELECT i.id, i.name, i.category, i.base_unit, i.purchase_unit, i.units_per_purchase,
            i.reorder_level, i.qty_on_hand, i.avg_cost_milli, i.last_cost_milli,
            i.supplier_id, s.name AS supplier_name, i.active,
+           ${hasBatchYield ? 'i.batch_yield_base' : '0'} AS batch_yield_base,
            ${
              hasRecipes
                ? '(SELECT COUNT(DISTINCT r.item_id) FROM recipe_items r WHERE r.ingredient_id = i.id)'
@@ -413,14 +420,32 @@ export function createInventoryRepository(db: AppDatabase) {
 
   /* --------------------------- stock movements --------------------------- */
 
-  const insertMovement = db.prepare(`
-    INSERT INTO stock_movements
-      (ingredient_id, kind, qty, unit_cost_milli, reason, ref_purchase_id,
-       ref_order_id, ref_order_item_id, wastage_reason, created_by, created_at)
-    VALUES
-      (@ingredientId, @kind, @qty, @unitCostMilli, @reason, @refPurchaseId,
-       @refOrderId, @refOrderItemId, @wastageReason, @createdBy, @now)
-  `);
+  /**
+   * `ref_batch_id` only exists after 023. On an older database the column is left
+   * out rather than prepared against a table that does not have it — the sub-recipe
+   * kinds are unreachable there anyway.
+   */
+  const hasBatchRef = Boolean(
+    db
+      .prepare("SELECT 1 FROM pragma_table_info('stock_movements') WHERE name = 'ref_batch_id'")
+      .get(),
+  );
+  const insertMovement = db.prepare(
+    hasBatchRef
+      ? `INSERT INTO stock_movements
+           (ingredient_id, kind, qty, unit_cost_milli, reason, ref_purchase_id,
+            ref_order_id, ref_order_item_id, ref_batch_id, wastage_reason, created_by,
+            created_at)
+         VALUES
+           (@ingredientId, @kind, @qty, @unitCostMilli, @reason, @refPurchaseId,
+            @refOrderId, @refOrderItemId, @refBatchId, @wastageReason, @createdBy, @now)`
+      : `INSERT INTO stock_movements
+           (ingredient_id, kind, qty, unit_cost_milli, reason, ref_purchase_id,
+            ref_order_id, ref_order_item_id, wastage_reason, created_by, created_at)
+         VALUES
+           (@ingredientId, @kind, @qty, @unitCostMilli, @reason, @refPurchaseId,
+            @refOrderId, @refOrderItemId, @wastageReason, @createdBy, @now)`,
+  );
   const selectMovements = db.prepare<[number, number], MovementRow>(`
     SELECT m.id, m.ingredient_id, m.kind, m.qty, m.unit_cost_milli, m.reason,
            m.ref_purchase_id, m.ref_order_id, m.wastage_reason,
@@ -577,6 +602,8 @@ export function createInventoryRepository(db: AppDatabase) {
       refPurchaseId?: number | null;
       refOrderId?: number | null;
       refOrderItemId?: number | null;
+      /** Only for the sub-recipe kinds: which batch consumed or produced it (4.I). */
+      refBatchId?: number | null;
       /** Only for kind 'wastage': why the stock was lost (4.F). */
       wastageReason?: string | null;
       createdBy: number;
@@ -584,7 +611,19 @@ export function createInventoryRepository(db: AppDatabase) {
       const row = selectIngredient.get(input.ingredientId);
       if (!row) throw new Error(`Ingredient ${input.ingredientId} does not exist`);
 
-      const addsValue = input.kind === 'opening' || input.kind === 'purchase';
+      /*
+       * Which movements change the AVERAGE cost, not just the quantity.
+       *
+       * A made batch is a purchase by another name: value genuinely arrives on the
+       * shelf at a cost the kitchen computed (4.I). Without it here, house-made mayo
+       * would sit at a zero average and every burger using it would look free.
+       * Everything else — a sale, wastage, an adjustment — leaves the average alone,
+       * because it moves quantity at a price the shelf already carries.
+       */
+      const addsValue =
+        input.kind === 'opening' ||
+        input.kind === 'purchase' ||
+        input.kind === 'sub_recipe_make';
       const newAvg = addsValue
         ? nextAverageCost({
             oldQty: row.qty_on_hand,
@@ -609,6 +648,7 @@ export function createInventoryRepository(db: AppDatabase) {
         refPurchaseId: input.refPurchaseId ?? null,
         refOrderId: input.refOrderId ?? null,
         refOrderItemId: input.refOrderItemId ?? null,
+        refBatchId: input.refBatchId ?? null,
         wastageReason: input.wastageReason ?? null,
         createdBy: input.createdBy,
         now,

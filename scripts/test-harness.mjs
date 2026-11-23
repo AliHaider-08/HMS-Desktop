@@ -66,6 +66,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     recipes: load('db/repositories/recipeRepository.js').createRecipeRepository(db),
     expenses: load('db/repositories/expensesRepository.js').createExpensesRepository(db),
     recurringBills: load('db/repositories/recurringBillsRepository.js').createRecurringBillsRepository(db),
+    subRecipes: load('db/repositories/subRecipeRepository.js').createSubRecipeRepository(db),
     stockOps: load('db/repositories/stockOpsRepository.js').createStockOpsRepository(db),
   };
 
@@ -106,6 +107,11 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
         .find((row) => row.deliveryBoyId === deliveryBoyId)?.commission ?? 0,
   });
 
+  const subRecipeService = load('services/subRecipeService.js').createSubRecipeService({
+    subRecipes: repositories.subRecipes,
+    inventory: repositories.inventory,
+  });
+
   const reportsService = createReportsService({
     expenses: repositories.expenses,
     orders: repositories.orders,
@@ -118,6 +124,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
     missingRecipes: () => repositories.catalog.countPricedItemsWithoutRecipe(),
     recurring: repositories.recurringBills,
   });
+
 
   const csvService = createCsvService({
     reports: reportsService,
@@ -220,6 +227,7 @@ export function createHarness({ withDemoData = true, databaseFile = null, seed =
       shifts: repositories.shifts,
       recurring: repositories.recurringBills,
     }),
+    subRecipes: subRecipeService,
   });
 
   /** Calls a channel exactly like the Electron main process does. */

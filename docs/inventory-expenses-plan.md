@@ -257,19 +257,18 @@ Each sub-phase has its own migration, test script, `npm run verify` gate and a `
 | **4.E** | Shop expenses | Categories, entry, drawer link, void with audit, recurring bills (4.E2), drawings (4.E2) | `020_expenses.sql` | `test-phase19.mjs` | **done** |
 | **4.F** | Wastage, adjustments, stock count | Wastage entry (reason codes + notes + dated at average cost), stock count with frozen variance (the shelf is SET to the counted qty), adjustment ledger, supplier return via the existing `supplier_return` kind, wastage report by ingredient+reason, Wastage + Stock counts tabs | `021_stock_ops.sql` | `test-phase21.mjs` | **done** (15 checks) |
 | **4.G** | Profit and reports | P&L (`reports:profit`), item profitability, stock valuation, purchases / wastage / expenses report tabs, four dashboard cards, CSV export for all six | none | `test-phase20.mjs` + `test-phase22.mjs` | **done** |
+| **4.I** | House-made ingredients | Batch recipe per ingredient (`ingredient_recipe_items`), batch yield, derived cost, make-a-batch stock document, one-level rule | `023_sub_recipes.sql` | `test-phase25.mjs` | **done** (10 checks) |
 | **4.H** | Follow-up round | Salaries + vehicle costs as P&L lines, opening-stock screen, purchases by ingredient with price trend, supplier return action, recurring bills (4.E2) | `022_recurring_bills.sql` | `test-phase23.mjs` + `test-phase24.mjs` | **done** (24 checks) |
 
-**Status: Phase 4 is complete, including the 4.H follow-up round.** All six client requirements
+**Status: Phase 4 is complete, including 4.H and 4.I.** All six client requirements
 are delivered (1 stock entry 4.A, 2 recipes 4.C, 3 automatic deduction 4.D, 4 purchase prices +
 history 4.B, 5 cost vs price vs profit 4.C + 4.G, 6 shop expenses 4.E) and every extra the plan
 added along the way — wastage, adjustments and stock counts (4.F), the full reporting set (4.G),
 and the follow-up round 4.H — are finished as well.
 
-The one item still deferred is **sub-recipes** (house-made sauces and marinades), which is waiting
-on **§15 question 4**: if the kitchen makes its own mayo or marinates chicken in-house, those are
-ingredients made from ingredients and the recipe table needs a self-reference. Building it before
-the answer would be guessing at the client's kitchen. `docs/inventory-expenses-plan.md` §15 lists
-the eight questions still open; nothing in the build is blocked on them except sub-recipes.
+**Sub-recipes are built (4.I)**, so no client answer is holding anything back any more. §15 Q4 was
+the last build question; the rest are shop-policy questions the client answers by *using* the app
+(what to put in opening stock, which bills to add, how often to count).
 
 Migration numbering (authoritative): 015 inventory, 016 purchases, 017 cash↔purchase link, 018 recipes, 019 deduction, 020 expenses, 021 stock ops, **022 recurring bills**.
 
@@ -366,6 +365,39 @@ the whole point.
 - Un-settling **voids** the expense rather than deleting it, and a deactivated template stops
   nagging while keeping all its history.
 
+### 4.I contract, as built — house-made ingredients
+
+The client's answer to §15 Q4. An ingredient can now be **made** instead of bought.
+
+- **`ingredients.batch_yield_base`** is the switch: `0` means bought, `> 0` means one batch
+  produces that many base units (1000 g of mayo). It lives on the ingredient because every screen
+  that lists ingredients already reads that row.
+- **`ingredient_recipe_items`** is the batch recipe — component, quantity, trim allowance — with
+  one line per component, exactly like a menu recipe.
+- **The cost is derived, never typed.** `unit cost = Σ(component qty × live average) ÷ batch
+  yield`. Ask "what does a kilo of my mayo cost today?" and it moves with the price of oil,
+  because it should. A typed price would be a guess that stays wrong forever.
+- **Making a batch is a stock document** (`sub_recipe_batches` + lines + `BAT-00001`). Components
+  come off the shelf as `sub_recipe_make` movements and the product goes on at the computed cost,
+  so its weighted average follows the real prices of what it is made of.
+- **A batch is frozen once made.** The line costs are snapshotted onto the batch; a price rise
+  tomorrow never rewrites what last week's batch cost.
+- **The batch is value-neutral.** The value that leaves as components equals the value that
+  arrives as product — `test-phase25.mjs` asserts the signed sum of every `sub_recipe_make`
+  movement is zero. That is the check that catches a rounding rule applied on one side only.
+- **One level only.** A house-made ingredient cannot go into another house-made one; the service
+  refuses with a message telling the owner to add the raw ingredients instead. A fast-food kitchen
+  has one level, and refusing the second keeps the cost a single pass with no recursion to get
+  subtly wrong.
+
+**Migration 023 note.** SQLite cannot alter a CHECK constraint, so the ledger had to be rebuilt to
+accept the two new kinds. With `foreign_keys = ON`, `DROP TABLE stock_movements` runs an implicit
+DELETE that fails while rows still reference the ingredients it points at. The migration therefore
+renames the table, creates the new one, copies the history (keeping every id), swaps the write path
+via `ALTER TABLE ... RENAME`, and leaves the emptied original as `stock_movements_legacy_016`.
+The rebuild is verified against a fully populated database: 42 movements, identical count and
+quantity sum, zero foreign-key violations.
+
 ### 4.F contract, as built
 
 `stock:wastage` · `stock:adjust` · `stock:wastage-report` · `stock:counts` · `stock:count` ·
@@ -454,7 +486,7 @@ Cost and profit are the owner's private numbers and are hidden from everyone els
 1. **Portions:** are they fixed (150 g chicken per burger) or "andaaza" (by eye)? The recipe is only as good as the portions.
 2. **Who sees profit?** Recommended: owner only. Managers can be allowed later.
 3. **Do you buy on credit (udhaar) from suppliers?** In v1 the app shows "owed to supplier" from credit purchases; a full supplier-payment ledger can be added after.
-4. **Do you make your own sauces / marinate chicken in-house?** If yes, sub-recipes are needed (planned as a later step).
+4. **Do you make your own sauces / marinate chicken in-house?** — **built (4.I):** Stock → *House-made*. Any ingredient can be given a batch recipe and a batch yield; its cost is then worked out from its components instead of being typed. Nothing needs answering before it can be used.
 5. **Opening stock:** on go-live day, what is on the shelf and at what cost? — **screen built (4.B/4.H):** Stock → *Opening stock*. The question is now for the client to *fill in* on go-live day, not for us to build.
 6. **Recurring bills:** which monthly bills should the app remind you about (rent, internet, gas)? — **screen built (4.E2/4.H):** Expenses → *Monthly bills*. The client answers by adding the bills himself; any bill can be added or paused.
 7. **Stock count frequency:** daily, weekly or monthly? — **not a build question:** Stock counts can be taken as often as wanted (4.F); the frequency is a shop routine, not a setting.
