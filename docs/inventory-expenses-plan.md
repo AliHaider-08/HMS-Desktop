@@ -266,6 +266,12 @@ history 4.B, 5 cost vs price vs profit 4.C + 4.G, 6 shop expenses 4.E) and every
 added along the way — wastage, adjustments and stock counts (4.F), the full reporting set (4.G),
 and the follow-up round 4.H — are finished as well.
 
+**A UI gap found after 4.I and closed:** the service computed `canMake` for every menu item — how
+many more the kitchen can still make from what is on the shelf — and no screen ever showed it. It
+now does, as a **Can make** column on the Menu page (red at 0). That number is the client's own
+stated reason for the whole stock feature ("taky mujhe pata lagy"), so having it invisible was the
+one remaining place where the app had the answer and did not say it.
+
 **Sub-recipes are built (4.I)**, so no client answer is holding anything back any more. §15 Q4 was
 the last build question; the rest are shop-policy questions the client answers by *using* the app
 (what to put in opening stock, which bills to add, how often to count).

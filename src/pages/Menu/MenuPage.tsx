@@ -270,6 +270,46 @@ export function MenuPage() {
       },
     },
     {
+      /*
+       * "Can make N" (4.C) — the tightest ingredient in the recipe.
+       *
+       * The client's reason for the whole stock feature: "taky mujhe pata lagy"
+       * so I know what is left. The number already existed in the service; it had
+       * simply never been shown, which left the owner with a shelf count and no
+       * answer to the question he actually asks at the counter.
+       *
+       * Deliberately blank for an item with no recipe, and for a role that may not
+       * see costs: how many you can sell is a stock fact, but it is derived from a
+       * recipe the cashier is not shown.
+       */
+      key: 'canMake',
+      header: 'Can make',
+      align: 'right',
+      render: (row) => {
+        if (!canCost) return <span className="text-text-secondary">—</span>;
+
+        const cost = costOf(row.id);
+        if (!cost || !cost.hasRecipe || cost.canMake === null) {
+          return <span className="text-text-secondary">—</span>;
+        }
+
+        // Zero is the number that matters: it means the kitchen cannot make one
+        // more, and it should not be the same grey as "not applicable".
+        return (
+          <span
+            className={
+              cost.canMake === 0
+                ? 'tabular font-medium text-status-cancelled'
+                : 'tabular'
+            }
+            title={cost.canMake === 0 ? 'An ingredient in this recipe has run out' : undefined}
+          >
+            {cost.canMake}
+          </span>
+        );
+      },
+    },
+    {
       key: 'available',
       header: 'Availability',
       render: (row) => (

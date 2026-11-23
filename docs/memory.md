@@ -311,6 +311,12 @@ Three rules worth remembering, because they are easy to "simplify" back into bug
 - `applyMovement` treats `sub_recipe_make` like a purchase for AVERAGE COST purposes. Without
   this, house mayo sat at a zero average and every burger using it looked free.
 
+**UI gap closed after 4.I:** `menuCosts.canMake` ("how many can I still sell", the client's own
+reason for the stock feature) was computed by the service and typed in the API but **never shown on
+any screen**. It now has a **Can make** column on the Menu page, red at 0. Worth remembering: a
+field that exists in the service and the types can still be invisible to the owner, and no
+automated test notices that — only reading the screens does.
+
 **Migration 023 rebuilds the whole `stock_movements` table** (SQLite cannot alter a CHECK
 constraint) to add the two new kinds. With `foreign_keys = ON`, dropping the old table fails
 while rows reference it, so the migration renames, recreates, copies (keeping ids), and leaves
