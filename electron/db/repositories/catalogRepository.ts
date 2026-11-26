@@ -85,6 +85,9 @@ export function createCatalogRepository(db: AppDatabase) {
   const countActiveItems = db.prepare<[], { total: number }>(
     'SELECT COUNT(*) AS total FROM items WHERE active = 1',
   );
+  const itemNameExists = db.prepare<[number, string], { total: number }>(
+    'SELECT COUNT(*) AS total FROM items WHERE category_id = ? AND name = ? COLLATE NOCASE',
+  );
 
   return {
     listCategories(): Category[] {
@@ -173,6 +176,11 @@ export function createCatalogRepository(db: AppDatabase) {
 
     countActiveItems(): number {
       return countActiveItems.get()?.total ?? 0;
+    },
+
+    /** Includes soft-deleted rows so repeatable seeders do not violate the unique index. */
+    itemNameExists(categoryId: number, name: string): boolean {
+      return (itemNameExists.get(categoryId, name)?.total ?? 0) > 0;
     },
 
     /**

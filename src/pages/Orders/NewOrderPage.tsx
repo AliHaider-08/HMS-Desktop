@@ -24,6 +24,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { toast } from '../../components/Toast';
 import { Alert } from '../../components/Alert';
 import { ApprovalDialog } from '../../components/ApprovalDialog';
+import { MenuItemPhoto } from '../../components/MenuItemPhoto';
 
 interface CartLine {
   item: MenuItem;
@@ -375,11 +376,12 @@ export function NewOrderPage() {
                       {inCart}
                     </span>
                   )}
-                  <p className="pr-6 font-medium text-text-primary">{item.name}</p>
-                  <div>
+                  <MenuItemPhoto image={item.image} name={item.name} className="mb-2 h-24 w-full" />
+                  <div className="w-full">
+                    <p className="truncate pr-2 font-medium text-text-primary">{item.name}</p>
                     <p className="text-card-title text-primary">{formatAmount(item.price)}</p>
                     <p className="text-caption text-text-secondary">
-                      {item.available ? item.categoryName : 'Sold out'}
+                      {item.available ? item.categoryName : item.price === 0 ? 'Set price first' : 'Sold out'}
                     </p>
                   </div>
                 </button>
@@ -716,17 +718,17 @@ export function NewOrderPage() {
             )}
 
             <div className="mt-4 flex flex-col gap-2">
-              <Button size="lg" onClick={() => void save(false)} isLoading={isSaving} fullWidth>
-                Save order
+              <Button size="lg" onClick={() => void save(true)} isLoading={isSaving} fullWidth>
+                Save order and print receipt
               </Button>
               <Button
                 size="lg"
                 variant="secondary"
-                onClick={() => void save(true)}
+                onClick={() => void save(false)}
                 disabled={isSaving}
                 fullWidth
               >
-                Save and open invoice
+                Save without printing
               </Button>
             </div>
 

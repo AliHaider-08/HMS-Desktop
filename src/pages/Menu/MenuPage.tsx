@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Resolver } from 'react-hook-form';
-import { ChefHat, CircleOff, Pencil, Plus, Search, Trash2, Utensils } from 'lucide-react';
+import { ChefHat, CircleOff, ImageUp, Pencil, Plus, Search, Trash2, Utensils } from 'lucide-react';
 import { z } from 'zod';
 import type { Category, Ingredient, MenuItem, RecipeLine } from '../../types/api';
 import { categorySchema, menuItemSchema } from '../../types/schemas';
@@ -72,6 +72,7 @@ export function MenuPage() {
   });
 
   const priceValue = itemForm.watch('price') ?? 0;
+  const itemImage = itemForm.watch('image');
 
   const categoryOptions = useMemo(
     () =>
@@ -104,14 +105,18 @@ export function MenuPage() {
   };
 
   const openNewItem = () => {
-    const firstCategory = categories.data?.[0];
-    if (!firstCategory) {
+    const availableCategories = categories.data ?? [];
+    const selectedCategory =
+      categoryFilter === 'all'
+        ? availableCategories[0]
+        : availableCategories.find((category) => category.id === categoryFilter);
+    if (!selectedCategory) {
       toast.error('Create a category first');
       setTab('categories');
       return;
     }
     itemForm.reset({
-      categoryId: firstCategory.id,
+      categoryId: selectedCategory.id,
       name: '',
       price: 0,
       available: true,
@@ -467,6 +472,15 @@ export function MenuPage() {
         )}
       </div>
 
+      {(items.data ?? []).some((item) => item.price === 0 && !item.available) && (
+        <div className="mb-4">
+          <Alert tone="warning">
+            Starter items are set to Rs 0 and unavailable. Edit each item with your actual price,
+            then mark it available before selling.
+          </Alert>
+        </div>
+      )}
+
       {tab === 'items' ? (
         <Table
           columns={itemColumns}
@@ -571,6 +585,79 @@ export function MenuPage() {
             error={itemForm.formState.errors.name?.message}
             {...itemForm.register('name')}
           />
+
+          <div className="flex flex-col gap-2">
+            <label className="text-label font-medium text-text-primary" htmlFor="menu-item-image">
+              Item photo
+            </label>
+            <div className="flex items-center gap-3">
+              {itemImage ? (
+                <img
+                  src={itemImage}
+                  alt="Menu item preview"
+                  className="h-16 w-16 rounded-control border border-border object-cover"
+                />
+              ) : (
+                <div className="flex h-16 w-16 items-center justify-center rounded-control border border-dashed border-border text-caption text-text-secondary">
+                  No photo
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <label
+                  htmlFor="menu-item-image"
+                  className="inline-flex h-control cursor-pointer items-center gap-2 rounded-control border border-border px-3 text-button hover:bg-background"
+                >
+                  <ImageUp aria-hidden className="h-4 w-4" />
+                  Choose photo
+                </label>
+                {itemImage && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => itemForm.setValue('image', null, { shouldDirty: true })}
+                  >
+                    <Trash2 aria-hidden className="h-4 w-4" />
+                    Remove
+                  </Button>
+                )}
+                <input
+                  id="menu-item-image"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = '';
+                    if (!file) return;
+                    if (file.size > 1_400_000) {
+                      setFormError('Choose an image smaller than 1.4 MB.');
+                      return;
+                    }
+                    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+                      setFormError('Choose a PNG, JPG or WebP image.');
+                      return;
+                    }
+
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      if (typeof reader.result === 'string') {
+                        itemForm.setValue('image', reader.result, {
+                          shouldDirty: true,
+                          shouldValidate: true,
+                        });
+                        setFormError(null);
+                      }
+                    };
+                    reader.onerror = () => setFormError('The selected image could not be read.');
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </div>
+            </div>
+            <p className="text-caption text-text-secondary">
+              This photo appears on the dashboard and order screen. Maximum 1.4 MB.
+            </p>
+          </div>
 
           <Select
             label="Category"

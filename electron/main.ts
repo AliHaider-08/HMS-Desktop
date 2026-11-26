@@ -15,6 +15,7 @@ import { createShiftsRepository } from './db/repositories/shiftsRepository';
 import { createDiscountsRepository } from './db/repositories/discountsRepository';
 import { seedDefaultAdmin } from './db/seed';
 import { seedDemoData } from './db/seedDemo';
+import { seedStarterMenu } from './db/seedMenu';
 import { createAuthService } from './services/authService';
 import { createSettingsService } from './services/settingsService';
 import { createLogoService } from './services/logoService';
@@ -145,6 +146,7 @@ async function bootstrapServices(): Promise<void> {
       sequences,
     });
   }
+  seedStarterMenu(catalogRepo);
 
   // One instance shared by the order service (deduct/reverse) and the tests.
   const stockDeduction = createStockDeductionService({

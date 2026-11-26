@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -13,7 +14,7 @@ import {
   UtensilsCrossed,
   Wallet,
 } from 'lucide-react';
-import type { OrderSummary } from '../../types/api';
+import type { MenuItem, OrderSummary } from '../../types/api';
 import { ORDER_STATUS_CLASSES, ORDER_STATUS_LABELS, ORDER_TYPE_LABELS } from '../../types/labels';
 import { getApi, unwrap } from '../../utils/api';
 import { useAsync } from '../../hooks/useAsync';
@@ -25,6 +26,7 @@ import { Button } from '../../components/Button';
 import { Card, CardHeading } from '../../components/Card';
 import { PageHeader } from '../../components/PageHeader';
 import { Table, type Column } from '../../components/Table';
+import { MenuItemPhoto } from '../../components/MenuItemPhoto';
 
 interface StatCardProps {
   label: string;
@@ -100,6 +102,30 @@ export function DashboardPage() {
     async () => unwrap(await getApi().reports.dashboard()),
     [],
   );
+  const menu = useAsync(async () => unwrap(await getApi().menu.listItems()), []);
+  const menuHighlights = useMemo(() => {
+    const groups = new Map<string, MenuItem[]>();
+    for (const item of menu.data ?? []) {
+      const group = groups.get(item.categoryName) ?? [];
+      group.push(item);
+      groups.set(item.categoryName, group);
+    }
+
+    const highlights: MenuItem[] = [];
+    for (let index = 0; highlights.length < 8; index += 1) {
+      let foundOne = false;
+      for (const group of groups.values()) {
+        const item = group[index];
+        if (item) {
+          highlights.push(item);
+          foundOne = true;
+          if (highlights.length === 8) break;
+        }
+      }
+      if (!foundOne) break;
+    }
+    return highlights;
+  }, [menu.data]);
 
   const recentColumns: Column<OrderSummary>[] = [
     {
@@ -197,6 +223,39 @@ export function DashboardPage() {
           tone="info"
         />
       </div>
+
+      {menuHighlights.length > 0 && (
+        <Card className="mb-6">
+          <CardHeading
+            title="Menu"
+            subtitle="Food items and prices"
+            action={
+              can('menu') ? (
+                <Link to="/menu" className="text-caption font-semibold text-primary hover:underline">
+                  Add photos
+                </Link>
+              ) : undefined
+            }
+          />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+            {menuHighlights.map((item) => (
+              <Link
+                key={item.id}
+                to={can('menu') ? '/menu' : '/orders'}
+                className="group min-w-0 rounded-control border border-border p-2 transition-shadow hover:shadow-md"
+                title={`${item.name} · ${currency} ${formatAmount(item.price)}`}
+              >
+                <MenuItemPhoto image={item.image} name={item.name} className="mb-2 aspect-square w-full" />
+                <p className="truncate text-caption font-medium text-text-primary">{item.name}</p>
+                <p className="truncate text-[10px] text-text-secondary">{item.categoryName}</p>
+                <p className="mt-1 text-caption font-semibold text-primary">
+                  {currency} {formatAmount(item.price)}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/*
        * Monthly bills that are due or late (4.E2).
