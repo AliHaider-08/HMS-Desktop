@@ -23,6 +23,7 @@ import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { Alert } from '../../components/Alert';
 import { toast } from '../../components/Toast';
 import { cn } from '../../utils/cn';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * The floor plan (Phase 3): which tables are free, which have a bill, and the two
@@ -32,6 +33,7 @@ import { cn } from '../../utils/cn';
  * merge is legal. The dangerous rules (no money may move) live in the service.
  */
 export function TablesPage() {
+  const navigate = useNavigate();
   const currency = useSettings((settings) => settings.currency);
   const { can } = useAuth();
   const canEditPlan = can('tables');
@@ -265,6 +267,13 @@ export function TablesPage() {
 
                   <div className="mt-auto flex gap-1.5">
                     <Button
+                      variant="secondary"
+                      className="flex-1"
+                      onClick={() => navigate(`/invoice/${table.orderId}`)}
+                    >
+                      Open bill
+                    </Button>
+                    <Button
                       variant="ghost"
                       className="flex-1"
                       onClick={() => setMergeSource(table)}
@@ -290,13 +299,14 @@ export function TablesPage() {
                   <p className="text-[11px] text-text-secondary">
                     Sold today: {formatAmount(table.lifetimeSales)}
                   </p>
-                  <a
-                    href="#/orders/new"
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/orders/new?tableId=${table.id}`)}
                     className="mt-auto inline-flex items-center justify-center gap-1 rounded-control border border-border px-3 py-1.5 text-button text-text-primary hover:bg-background"
                   >
                     <Plus aria-hidden className="h-3.5 w-3.5" />
-                    New bill
-                  </a>
+                    Seat guests
+                  </button>
                 </>
               )}
             </div>

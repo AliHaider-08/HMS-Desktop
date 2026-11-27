@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Minus, Plus, Search, ShieldCheck, ShoppingBag, Trash2, X } from 'lucide-react';
 import type {
   DeliveryBoy,
@@ -38,6 +38,7 @@ interface CartLine {
  */
 export function NewOrderPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const settings = useSettings((state) => state);
   const currency = settings.currency;
 
@@ -47,15 +48,13 @@ export function NewOrderPage() {
   const [orderType, setOrderType] = useState<OrderType>('dine_in');
   const [waiterId, setWaiterId] = useState<string>('');
   // Dine-in only. Empty means "no table", which the main process allows.
-  const [tableId, setTableId] = useState<string>('');
+  const [tableId, setTableId] = useState<string>(() => searchParams.get('tableId') ?? '');
   const [deliveryBoyId, setDeliveryBoyId] = useState<string>('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState(0);
-  // Promo codes and manual discounts are alternatives — a promo code wins.
-  const [promoCode, setPromoCode] = useState('');
   // The main process decides what a discount means; the UI only displays it.
   const [decision, setDecision] = useState<DiscountDecision | null>(null);
   const [approvalId, setApprovalId] = useState<number | null>(null);
@@ -105,11 +104,11 @@ export function NewOrderPage() {
    * after every edit; an approval obtained for an earlier amount is dropped,
    * because it cannot legally cover a different figure.
    */
-  const revalidate = async (nextDiscount: number, nextPromo: string) => {
+  const revalidate = async (nextDiscount: number) => {
     setApprovalId(null);
     setApprovalReason('');
 
-    if (nextDiscount <= 0 && nextPromo.trim() === '') {
+    if (nextDiscount <= 0) {
       setDecision(null);
       return;
     }
@@ -120,7 +119,7 @@ export function NewOrderPage() {
           subtotal,
           percentX100: 0,
           amount: nextDiscount,
-          promoCode: nextPromo,
+          promoCode: '',
         }),
       );
       setDecision(result);
@@ -132,12 +131,7 @@ export function NewOrderPage() {
 
   const changeDiscount = (paisa: number) => {
     setDiscount(paisa);
-    void revalidate(paisa, promoCode);
-  };
-
-  const changePromoCode = (code: string) => {
-    setPromoCode(code);
-    void revalidate(discount, code);
+    void revalidate(paisa);
   };
 
   const change = Math.max(tendered - total, 0);
@@ -224,7 +218,7 @@ export function NewOrderPage() {
           tableId: orderType === 'dine_in' && tableId ? Number(tableId) : null,
           deliveryBoyId: deliveryBoyId ? Number(deliveryBoyId) : null,
           discount: safeDiscount,
-          promoCode,
+          promoCode: '',
           approvedBy: approvalId,
           discountReason: approvalReason,
           taxPercent: effectiveTaxPercent,
@@ -432,16 +426,31 @@ export function NewOrderPage() {
               )}
 
               {orderType === 'dine_in' && (
-                <Select
-                  label="Waiter"
-                  placeholder="Choose the waiter"
-                  options={(waiters.data ?? []).map((waiter: Waiter) => ({
-                    value: String(waiter.id),
-                    label: waiter.name,
-                  }))}
-                  value={waiterId}
-                  onChange={(event) => setWaiterId(event.target.value)}
-                />
+                <>
+                  <Select
+                    label="Waiter"
+                    placeholder={waiters.isLoading ? 'Loading waiters…' : 'Choose a waiter'}
+                    options={(waiters.data ?? []).map((waiter: Waiter) => ({
+                      value: String(waiter.id),
+                      label: waiter.name,
+                    }))}
+                    value={waiterId}
+                    onChange={(event) => setWaiterId(event.target.value)}
+                    disabled={waiters.isLoading || (waiters.data ?? []).length === 0}
+                  />
+                  {!waiters.isLoading && (waiters.data ?? []).length === 0 && (
+                    <div className="-mt-2 rounded-control border border-border bg-background p-2 text-caption text-text-secondary">
+                      No active waiters are set up. Add waiter names in Staff to select them here.
+                      <button
+                        type="button"
+                        onClick={() => navigate('/staff')}
+                        className="ml-1 font-semibold text-primary underline"
+                      >
+                        Open Staff
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
 
               {orderType === 'delivery' && (
@@ -572,15 +581,6 @@ export function NewOrderPage() {
                 }
               />
             </div>
-
-            <Input
-              label="Promo code"
-              value={promoCode}
-              placeholder="EID15"
-              className="mt-3"
-              onChange={(event) => changePromoCode(event.target.value.toUpperCase())}
-              hint="A promo code replaces the manual discount above."
-            />
 
             <Input
               label="Order note"

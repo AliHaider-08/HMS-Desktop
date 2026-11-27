@@ -40,6 +40,7 @@ export function InvoicePage() {
   const [isSavingPdf, setIsSavingPdf] = useState(false);
   const [askPrint, setAskPrint] = useState(false);
   const [isPrintingKot, setIsPrintingKot] = useState(false);
+  const [isClosingDineIn, setIsClosingDineIn] = useState(false);
   // Amending a saved bill (Phase 3).
   const [amendOpen, setAmendOpen] = useState(false);
 
@@ -156,6 +157,22 @@ export function InvoicePage() {
       await invoice.reload();
     } catch (error) {
       toast.error(errorMessage(error));
+    }
+  };
+
+  const closeDineInAndPrint = async () => {
+    if (!data || data.order.type !== 'dine_in' || outstanding > 0) return;
+    setIsClosingDineIn(true);
+    try {
+      if (data.order.status !== 'delivered') {
+        unwrap(await getApi().orders.updateStatus(orderId, 'delivered'));
+        await invoice.reload();
+      }
+      await printNow();
+    } catch (error) {
+      toast.error(errorMessage(error, 'The table could not be closed'));
+    } finally {
+      setIsClosingDineIn(false);
     }
   };
 
@@ -465,6 +482,18 @@ export function InvoicePage() {
             {outstanding > 0 && (
               <Button variant="secondary" fullWidth onClick={openPayment}>
                 Add payment
+              </Button>
+            )}
+            {data?.order.type === 'dine_in' && data.order.status !== 'delivered' && (
+              <Button
+                className="mt-2"
+                fullWidth
+                onClick={() => void closeDineInAndPrint()}
+                disabled={outstanding > 0 || isClosingDineIn || isPrinting}
+                isLoading={isClosingDineIn}
+              >
+                <Printer aria-hidden className="h-4 w-4" />
+                {outstanding > 0 ? 'Pay balance to close table' : 'Close table and print receipt'}
               </Button>
             )}
           </Card>
